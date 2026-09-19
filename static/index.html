@@ -118,6 +118,42 @@
     resize: vertical;
   }
 
+  .markdown-body {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-top: 14px;
+    max-height: 460px;
+    overflow: auto;
+    line-height: 1.55;
+  }
+  .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+    margin-top: 1.2em;
+    margin-bottom: .4em;
+  }
+  .markdown-body h1:first-child, .markdown-body h2:first-child, .markdown-body h3:first-child {
+    margin-top: 0;
+  }
+  .markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 10px 0;
+    font-size: 14px;
+  }
+  .markdown-body th, .markdown-body td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+  }
+  .markdown-body code {
+    background: rgba(127,127,127,.15);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
+
   .hidden { display: none !important; }
   .spinner {
     width: 14px; height: 14px;
@@ -150,6 +186,7 @@
         <option value="text">Текст</option>
         <option value="table">Таблиця</option>
         <option value="figure">Фігура/схема</option>
+        <option value="document">Документ (Markdown)</option>
       </select>
       <button class="primary" id="runBtn" disabled>Розпізнати</button>
       <span class="status" id="status"></span>
@@ -163,12 +200,16 @@
   <div class="panel hidden" id="resultPanel">
     <div class="row" style="margin-top:0">
       <strong>Результат</strong>
-      <button class="ghost" id="copyBtn" style="margin-left:auto">Скопіювати</button>
+      <button class="ghost hidden" id="viewToggleBtn" style="margin-left:auto">Сирий Markdown</button>
+      <button class="ghost" id="copyBtn" style="margin-left:0">Скопіювати</button>
     </div>
+    <div id="resultRendered" class="markdown-body hidden"></div>
     <textarea id="resultText" readonly></textarea>
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
 <script>
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
@@ -178,10 +219,34 @@
   const statusEl = document.getElementById('status');
   const resultPanel = document.getElementById('resultPanel');
   const resultText = document.getElementById('resultText');
+  const resultRendered = document.getElementById('resultRendered');
+  const viewToggleBtn = document.getElementById('viewToggleBtn');
   const copyBtn = document.getElementById('copyBtn');
   const tokenInput = document.getElementById('tokenInput');
 
   let selectedFile = null;
+  let isDocumentMode = false;
+  let showingRendered = false;
+
+  function renderMarkdownPreview() {
+    if (!window.marked || !window.DOMPurify) {
+      // CDN unreachable (offline homelab, blocked network) — fall back
+      // to raw text so the feature degrades instead of breaking.
+      showingRendered = false;
+      return;
+    }
+    const html = DOMPurify.sanitize(marked.parse(resultText.value));
+    resultRendered.innerHTML = html;
+  }
+
+  function setResultView(rendered) {
+    showingRendered = rendered && isDocumentMode;
+    resultRendered.classList.toggle('hidden', !showingRendered);
+    resultText.classList.toggle('hidden', showingRendered);
+    viewToggleBtn.textContent = showingRendered ? 'Сирий Markdown' : 'Показати як документ';
+  }
+
+  viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered));
 
   try {
     tokenInput.value = localStorage.getItem('glm_ocr_token') || '';
@@ -266,6 +331,14 @@
       }
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
+      isDocumentMode = data.mode === 'document';
+      viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
+      if (isDocumentMode) {
+        renderMarkdownPreview();
+        setResultView(true);
+      } else {
+        setResultView(false);
+      }
       if (data.truncated) {
         setStatus('Готово за ' + data.seconds + ' с, але схоже на зациклення (обрізано за лімітом токенів)', 'err');
       } else {

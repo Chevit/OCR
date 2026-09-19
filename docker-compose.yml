@@ -16,13 +16,15 @@ services:
       - ollama
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-      OLLAMA_MODEL: "glm-ocr:latest"
+      OLLAMA_MODEL: "AuditAid/PaddleOCR-VL-1.6-0.9B:latest"
       # API_TOKEN: "set-a-secret-here"   # uncomment to require a bearer token
       MAX_MEGAPIXELS: "1.0"
       NUM_CTX: "8192"
       NUM_PREDICT: "2048"
       REPEAT_PENALTY: "1.15"
       REPEAT_LAST_N: "128"
+      GEN_TIME_LIMIT: "60"     # PaddleOCR-VL is a 0.9B model — same class as glm-ocr, faster per token than deepseek-ocr
+      REQUEST_TIMEOUT: "180"   # stall guard only (no data for N seconds) — GEN_TIME_LIMIT bounds total time
     ports:
       - "8000:8000"
 
