@@ -1,0 +1,30 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: glm-ocr-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"   # optional: expose only if you want direct access to Ollama itself
+
+  ocr:
+    build: .
+    container_name: glm-ocr-service
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+      OLLAMA_MODEL: "glm-ocr:latest"
+      # API_TOKEN: "set-a-secret-here"   # uncomment to require a bearer token
+      MAX_MEGAPIXELS: "1.0"
+      NUM_CTX: "8192"
+      NUM_PREDICT: "2048"
+      REPEAT_PENALTY: "1.15"
+      REPEAT_LAST_N: "128"
+    ports:
+      - "8000:8000"
+
+volumes:
+  ollama-data:
