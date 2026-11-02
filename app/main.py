@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import difflib
 import io
@@ -11,7 +12,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image
+from PIL import Image, ImageOps
 
 # --- Configuration (all overridable via environment variables) ----------
 
@@ -32,6 +33,17 @@ GEN_TIME_LIMIT = float(os.environ.get("GEN_TIME_LIMIT", "600"))
 # actually bounds how long a request takes overall.
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "900"))
 
+TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
+TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "ukr+eng")
+# Unlike the LLM, Tesseract needs detail (~300 DPI): an A4 page at 300 DPI is ~8.7 MP.
+TESSERACT_MAX_MEGAPIXELS = float(os.environ.get("TESSERACT_MAX_MEGAPIXELS", "8"))
+TESSERACT_TIMEOUT = float(os.environ.get("TESSERACT_TIMEOUT", "120"))
+
+# Tesseract page segmentation mode per OCR mode: 3 = automatic layout,
+# 6 = one uniform block read row by row (keeps table rows together),
+# 11 = sparse text scattered around a figure.
+TESSERACT_PSM = {"text": 3, "table": 6, "figure": 11, "document": 3}
+
 MODE_PROMPTS = {
     "text": "Free OCR.",
     "table": "Parse the figure.",
@@ -51,32 +63,41 @@ def check_auth(authorization: Optional[str]) -> None:
         return
     expected = f"Bearer {API_TOKEN}"
     if authorization != expected:
-        raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
+        raise HTTPException(status_code=401, detail="Відсутній або невірний токен доступу")
 
 
-def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
-    """Resize the image so it stays near the resolution GLM-OCR was trained on.
-    Feeding it much larger images is the #1 cause of runaway token repetition."""
+def open_image(raw: bytes) -> Image.Image:
+    """Open and decode an upload, rejecting oversized images before decoding
+    the pixels so a huge image can't exhaust the Pi's RAM."""
     try:
         img = Image.open(io.BytesIO(raw))
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read image: {exc}")
+        raise HTTPException(
+            status_code=400, detail=f"Не вдалося прочитати зображення. Деталі: {exc}"
+        )
 
     width, height = img.size
-    megapixels = (width * height) / 1_000_000
-    if megapixels > MAX_SOURCE_MEGAPIXELS:
+    if (width * height) / 1_000_000 > MAX_SOURCE_MEGAPIXELS:
         raise HTTPException(
             status_code=413,
-            detail=(
-                f"Image must be at most {MAX_SOURCE_MEGAPIXELS:g} megapixels "
-                "before resizing"
-            ),
+            detail=f"Зображення має бути не більше {MAX_SOURCE_MEGAPIXELS:g} МП",
         )
 
     try:
         img.load()
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read image: {exc}")
+        raise HTTPException(
+            status_code=400, detail=f"Не вдалося прочитати зображення. Деталі: {exc}"
+        )
+    return img
+
+
+def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
+    """Resize the image so it stays near the resolution GLM-OCR was trained on.
+    Feeding it much larger images is the #1 cause of runaway token repetition."""
+    img = open_image(raw)
+    width, height = img.size
+    megapixels = (width * height) / 1_000_000
 
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
@@ -89,6 +110,114 @@ def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
+    """Clean up an image for Tesseract: upright, grayscale, high contrast, and
+    at a resolution close to a 300 DPI scan."""
+    img = ImageOps.exif_transpose(open_image(raw))  # phone photos are often rotated
+
+    # Converting straight to grayscale turns transparent pixels black, which
+    # hides black text, so flatten transparency onto white first.
+    if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+        img = Image.alpha_composite(
+            Image.new("RGBA", img.size, "white"), img.convert("RGBA")
+        )
+    img = ImageOps.autocontrast(img.convert("L"))
+
+    width, height = img.size
+    megapixels = (width * height) / 1_000_000
+    target = min(1.0, max_megapixels)
+    if megapixels > max_megapixels:
+        scale = (max_megapixels / megapixels) ** 0.5
+    elif megapixels < target:
+        scale = min(2.0, (target / megapixels) ** 0.5)
+    else:
+        scale = 1.0
+    if scale != 1.0:
+        new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        img = img.resize(new_size, Image.LANCZOS)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+async def run_tesseract(image_png: bytes, mode: str) -> str:
+    """Run the tesseract CLI on a PNG passed through stdin (no temp files, so
+    patient documents never touch the disk)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            TESSERACT_CMD, "stdin", "stdout",
+            "-l", TESSERACT_LANGS,
+            "--psm", str(TESSERACT_PSM[mode]),
+            "-c", "preserve_interword_spaces=1",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Tesseract не встановлено на сервері. Деталі: '{TESSERACT_CMD}' not found",
+        )
+
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(image_png), TESSERACT_TIMEOUT)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        raise HTTPException(
+            status_code=504,
+            detail=f"Tesseract не завершив розпізнавання за {TESSERACT_TIMEOUT:.0f} с",
+        )
+
+    if proc.returncode != 0:
+        details = err.decode("utf-8", errors="replace").strip()[:500]
+        raise HTTPException(
+            status_code=502,
+            detail=f"Tesseract не зміг розпізнати зображення. Деталі: {details}",
+        )
+    return out.decode("utf-8", errors="replace")
+
+
+def clean_tesseract_text(text: str) -> str:
+    """Drop form feeds and trailing spaces; keep at most two blank lines in a row."""
+    lines = [line.rstrip() for line in text.replace("\f", "").splitlines()]
+    return re.sub(r"\n{4,}", "\n\n\n", "\n".join(lines)).strip()
+
+
+async def tesseract_status() -> dict:
+    """Report whether tesseract runs and has every language from TESSERACT_LANGS."""
+    wanted = TESSERACT_LANGS.split("+")
+    status = {"available": False, "version": None, "langs": [], "missing_langs": wanted}
+
+    async def run(*args: str) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            TESSERACT_CMD, *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # older versions print to stderr
+        )
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), 10)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise
+        return out.decode("utf-8", errors="replace")
+
+    try:
+        version = await run("--version")
+        langs = await run("--list-langs")
+    except (OSError, TimeoutError):
+        return status
+
+    # "--list-langs" prints a "List of available languages ..." header first.
+    status["langs"] = [l.strip() for l in langs.splitlines()[1:] if l.strip()]
+    status["missing_langs"] = [l for l in wanted if l not in status["langs"]]
+    status["version"] = version.splitlines()[0].strip() if version.strip() else None
+    status["available"] = not status["missing_langs"]
+    return status
 
 
 def strip_markdown_fence(text: str) -> str:
@@ -194,7 +323,7 @@ async def run_ocr(
                     body = await resp.aread()
                     raise HTTPException(
                         status_code=502,
-                        detail=f"Ollama returned {resp.status_code}: {body[:500]}",
+                        detail=f"Ollama повернула помилку {resp.status_code}. Деталі: {body[:500]}",
                     )
 
                 async for line in resp.aiter_lines():
@@ -210,7 +339,7 @@ async def run_ocr(
                     obj = json.loads(line)
                     if "error" in obj:
                         raise HTTPException(
-                            status_code=502, detail=f"Ollama error: {obj['error']}"
+                            status_code=502, detail=f"Помилка Ollama. Деталі: {obj['error']}"
                         )
 
                     chunks.append(obj.get("response", ""))
@@ -229,14 +358,14 @@ async def run_ocr(
         raise HTTPException(
             status_code=504,
             detail=(
-                f"Ollama did not return a token within {REQUEST_TIMEOUT:.0f} seconds. "
-                "The model may still be loading or the request is too large."
+                f"Ollama не відповіла за {REQUEST_TIMEOUT:.0f} с. Модель може ще "
+                "завантажуватись або запит завеликий."
             ),
         )
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Could not reach Ollama at {OLLAMA_HOST}: {exc}",
+            detail=f"Не вдалося з'єднатися з Ollama ({OLLAMA_HOST}). Деталі: {exc}",
         )
 
     return "".join(chunks), stop_reason
@@ -246,6 +375,8 @@ async def run_ocr(
 
 @app.get("/health")
 async def health():
+    # Reported even when Ollama is down: Tesseract alone keeps the service usable.
+    tesseract = await tesseract_status()
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             resp = await client.get(f"{OLLAMA_HOST}/api/tags")
@@ -255,7 +386,11 @@ async def health():
         except Exception as exc:
             return JSONResponse(
                 status_code=503,
-                content={"status": "ollama_unreachable", "detail": str(exc)},
+                content={
+                    "status": "ollama_unreachable",
+                    "detail": str(exc),
+                    "tesseract": tesseract,
+                },
             )
 
     return {
@@ -264,6 +399,7 @@ async def health():
         "model": OLLAMA_MODEL,
         "model_pulled": model_ready,
         "known_models": tags,
+        "tesseract": tesseract,
     }
 
 
@@ -271,6 +407,7 @@ def _ocr_response(
     *,
     text: str,
     mode: str,
+    engine: str,
     model: str,
     elapsed: float,
     filename: Optional[str],
@@ -284,6 +421,7 @@ def _ocr_response(
     return {
         "text": text,
         "mode": mode,
+        "engine": engine,
         "model": model,
         "seconds": elapsed,
         "filename": filename,
@@ -298,6 +436,7 @@ async def ocr(
     file: UploadFile = File(...),
     mode: Literal["text", "table", "figure", "document"] = Form("text"),
     output: Literal["text", "json"] = Form("json"),
+    engine: Literal["deepseek", "tesseract"] = Form("deepseek"),
     max_megapixels: Optional[float] = Form(None),
     max_predict: Optional[int] = Form(None),
     authorization: Optional[str] = Header(None),
@@ -307,25 +446,42 @@ async def ocr(
     if request.headers.get("content-length") and int(request.headers["content-length"]) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"Upload must be at most {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+            detail=f"Файл має бути не більше {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
         )
 
     raw = await file.read()
     if not raw:
-        raise HTTPException(status_code=400, detail="Empty file upload")
+        raise HTTPException(status_code=400, detail="Порожній файл")
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"Upload must be at most {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+            detail=f"Файл має бути не більше {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
         )
 
     if max_megapixels is not None and max_megapixels <= 0:
-        raise HTTPException(status_code=400, detail="max_megapixels must be greater than 0")
+        raise HTTPException(status_code=400, detail="max_megapixels має бути більше 0")
 
     if max_predict is not None and not 64 <= max_predict <= NUM_PREDICT:
         raise HTTPException(
             status_code=400,
-            detail=f"max_predict must be between 64 and {NUM_PREDICT}",
+            detail=f"max_predict має бути від 64 до {NUM_PREDICT}",
+        )
+
+    if engine == "tesseract":
+        # max_predict is a DeepSeek setting and is ignored here.
+        image_png = prepare_for_tesseract(raw, max_megapixels or TESSERACT_MAX_MEGAPIXELS)
+        started = time.time()
+        text = clean_tesseract_text(await run_tesseract(image_png, mode))
+        return _ocr_response(
+            text=text,
+            mode=mode,
+            engine=engine,
+            model=f"tesseract ({TESSERACT_LANGS})",
+            elapsed=round(time.time() - started, 2),
+            filename=file.filename,
+            truncated=False,
+            warning=None,
+            output=output,
         )
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
@@ -372,6 +528,7 @@ async def ocr(
     return _ocr_response(
         text=text,
         mode=mode,
+        engine=engine,
         model=OLLAMA_MODEL,
         elapsed=elapsed,
         filename=file.filename,
@@ -384,11 +541,11 @@ async def ocr(
 @app.get("/api")
 async def api_info():
     return {
-        "service": "glm-ocr-service",
+        "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text, max_megapixels, max_predict",
-            "GET /health": "checks connectivity to Ollama and whether the model is pulled",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text, engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
+            "GET /health": "checks Ollama (and whether the model is pulled) and Tesseract languages",
         },
     }
 

@@ -194,6 +194,10 @@
     <img id="preview" alt="Прев'ю">
 
     <div class="row">
+      <select id="engine" aria-label="Рушій розпізнавання" title="Рушій розпізнавання">
+        <option value="tesseract" selected>Швидко (Tesseract)</option>
+        <option value="deepseek">Точно (DeepSeek)</option>
+      </select>
       <select id="speedProfile" aria-label="Швидкість і якість" title="Швидкість і якість">
         <option value="fast">Швидко</option>
         <option value="balanced" selected>Збалансовано</option>
@@ -235,6 +239,7 @@
   const preview = document.getElementById('preview');
   const runBtn = document.getElementById('runBtn');
   const stopBtn = document.getElementById('stopBtn');
+  const engineSel = document.getElementById('engine');
   const speedProfile = document.getElementById('speedProfile');
   const profileHint = document.getElementById('profileHint');
   const modeSel = document.getElementById('mode');
@@ -267,6 +272,7 @@
   function setBusy(busy) {
     runBtn.disabled = busy || !selectedFile;
     modeSel.disabled = busy;
+    engineSel.disabled = busy;
     speedProfile.disabled = busy;
     tokenInput.disabled = busy;
     stopBtn.disabled = !busy;
@@ -295,6 +301,22 @@
   viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered));
   speedProfile.addEventListener('change', updateProfileHint);
   updateProfileHint();
+
+  // The speed profile only tunes DeepSeek (image size, token limit).
+  function updateEngineUi() {
+    const isDeepseek = engineSel.value === 'deepseek';
+    speedProfile.classList.toggle('hidden', !isDeepseek);
+    profileHint.classList.toggle('hidden', !isDeepseek);
+  }
+  try {
+    const savedEngine = localStorage.getItem('glm_ocr_engine');
+    if ([...engineSel.options].some(o => o.value === savedEngine)) engineSel.value = savedEngine;
+  } catch {}
+  engineSel.addEventListener('change', () => {
+    try { localStorage.setItem('glm_ocr_engine', engineSel.value); } catch {}
+    updateEngineUi();
+  });
+  updateEngineUi();
 
   try {
     tokenInput.value = localStorage.getItem('glm_ocr_token') || '';
@@ -355,22 +377,26 @@
     setBusy(true);
     resultPanel.classList.add('hidden');
 
+    const isDeepseek = engineSel.value === 'deepseek';
     const startedAt = Date.now();
     statusEl.className = 'status';
     statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... 0 с';
     const ticker = setInterval(() => {
       const s = Math.round((Date.now() - startedAt) / 1000);
       statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... ' + s + ' с'
-        + (s > 60 ? ' (на слабкому залізі це може тривати кілька хвилин)' : '');
+        + (isDeepseek && s > 60 ? ' (на слабкому залізі це може тривати кілька хвилин)' : '');
     }, 1000);
 
     const form = new FormData();
     form.append('file', selectedFile);
     form.append('mode', modeSel.value);
     form.append('output', 'json');
-    const profile = selectedProfile();
-    form.append('max_megapixels', profile.megapixels);
-    form.append('max_predict', profile.maxPredict);
+    form.append('engine', engineSel.value);
+    if (isDeepseek) {
+      const profile = selectedProfile();
+      form.append('max_megapixels', profile.megapixels);
+      form.append('max_predict', profile.maxPredict);
+    }
 
     const headers = {};
     if (tokenInput.value.trim()) {
@@ -381,13 +407,16 @@
       const resp = await fetch('/ocr', {
         method: 'POST', body: form, headers, signal: controller.signal,
       });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
-        throw new Error(data.detail || ('HTTP ' + resp.status));
+        throw new Error(typeof data.detail === 'string'
+          ? data.detail
+          : 'сервер повернув помилку (HTTP ' + resp.status + ')');
       }
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
-      isDocumentMode = data.mode === 'document';
+      // Tesseract returns plain text, so there is no Markdown to render.
+      isDocumentMode = data.mode === 'document' && data.engine !== 'tesseract';
       viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
       if (isDocumentMode) {
         renderMarkdownPreview();

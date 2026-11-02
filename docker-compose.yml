@@ -10,7 +10,7 @@ services:
 
   ocr:
     build: .
-    container_name: glm-ocr-service
+    container_name: ocr-service
     restart: unless-stopped
     depends_on:
       - ollama
