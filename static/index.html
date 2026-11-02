@@ -193,7 +193,7 @@
       <button class="ghost" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
       <button class="ghost" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
       <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
-      <span class="profile-hint">Потягни за краї рамки, щоб обрізати зображення до потрібної частини</span>
+      <span class="profile-hint">Потягни за краї рамки, щоб обрізати. Колесо миші — масштаб, перетягування зображення — рух</span>
     </div>
 
     <div class="row">
@@ -264,7 +264,6 @@
   let showingRendered = false;
   let activeController = null;
   let cropper = null;
-  let cropEdited = false; // untouched frame -> send the original file as is
   const profiles = {
     fast: { megapixels: 0.5, maxPredict: 512, hint: '0,5 МП · до 512 токенів' },
     balanced: { megapixels: 1, maxPredict: 1024, hint: '1 МП · до 1024 токенів' },
@@ -354,17 +353,19 @@
     preview.src = URL.createObjectURL(file);
     cropBox.classList.remove('hidden');
     cropTools.classList.remove('hidden');
-    cropEdited = false;
     cropper = new Cropper(preview, {
       viewMode: 1,            // keep the frame inside the image
       autoCropArea: 1,        // start with the whole image selected
       background: false,
-      zoomable: false,
-      movable: false,
+      // Dragging anywhere pans the image (also under the frame); the frame is
+      // resized by its handles. Otherwise a frame that fills the view could
+      // not be panned at all.
+      dragMode: 'move',
+      cropBoxMovable: false,
+      toggleDragModeOnDblclick: false,
       // Modern browsers already apply the photo's EXIF rotation when drawing
       // the image; letting Cropper.js apply it again would rotate it twice.
       checkOrientation: false,
-      cropend: () => { cropEdited = true; },
     });
     setBusy(false);
     setStatus('');
@@ -384,18 +385,22 @@
     cropper.setCanvasData({ left: (box.width - width) / 2, top: (box.height - height) / 2, width, height });
     cropper.crop();
     cropper.setCropBoxData(cropper.getCanvasData());
-    cropEdited = true;
   }
   document.getElementById('rotateLeftBtn').addEventListener('click', () => rotate(-90));
   document.getElementById('rotateRightBtn').addEventListener('click', () => rotate(90));
   document.getElementById('resetCropBtn').addEventListener('click', () => {
-    cropper.reset(); cropEdited = false;
+    cropper.reset();
   });
 
   // The crop is exported at the original resolution, not the preview's.
   // JPEG keeps a full-page crop well under the 20 MB upload limit.
   function imageToSend() {
-    if (!cropEdited) return Promise.resolve(selectedFile);
+    // Zooming also changes which part the frame covers, so compare the frame
+    // with the whole image instead of tracking edits.
+    const d = cropper.getData(true), img = cropper.getImageData();
+    const whole = d.rotate === 0 && d.x <= 0 && d.y <= 0
+      && d.width >= img.naturalWidth && d.height >= img.naturalHeight;
+    if (whole) return Promise.resolve(selectedFile);
     const canvas = cropper.getCroppedCanvas({ fillColor: '#fff', imageSmoothingQuality: 'high' });
     const name = selectedFile.name.replace(/\.[^.]*$/, '') + '-crop.jpg';
     return new Promise((resolve, reject) => canvas.toBlob(
