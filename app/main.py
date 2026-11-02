@@ -16,60 +16,27 @@ from PIL import Image
 # --- Configuration (all overridable via environment variables) ----------
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "AuditAid/PaddleOCR-VL-1.6-0.9B:latest")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "deepseek-ocr:latest")
 API_TOKEN = os.environ.get("API_TOKEN", "")  # empty = no auth required
 MAX_MEGAPIXELS = float(os.environ.get("MAX_MEGAPIXELS", "1.0"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
 MAX_SOURCE_MEGAPIXELS = float(os.environ.get("MAX_SOURCE_MEGAPIXELS", "20"))
-# The docparser pipeline does its own layout detection and benefits from
-# more detail than the VLM-only path (which is tuned to avoid runaway
-# repetition on a 0.9B model) — so it gets a separate, higher default cap.
-DOCPARSER_MAX_MEGAPIXELS = float(os.environ.get("DOCPARSER_MAX_MEGAPIXELS", "4.0"))
 NUM_CTX = int(os.environ.get("NUM_CTX", "8192"))
 NUM_PREDICT = int(os.environ.get("NUM_PREDICT", "2048"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0"))
 REPEAT_PENALTY = float(os.environ.get("REPEAT_PENALTY", "1.15"))
 REPEAT_LAST_N = int(os.environ.get("REPEAT_LAST_N", "128"))
-GEN_TIME_LIMIT = float(os.environ.get("GEN_TIME_LIMIT", "90"))
+GEN_TIME_LIMIT = float(os.environ.get("GEN_TIME_LIMIT", "600"))
 # httpx applies this as a "no data received for N seconds" stall guard on a
 # streamed response, not a total-duration cap — GEN_TIME_LIMIT is what
 # actually bounds how long a request takes overall.
-REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "180"))
-
-# Optional companion service (see docparser/ and the "precise" profile in
-# docker-compose.yml) that runs PaddleOCR's own layout-aware doc_parser
-# pipeline instead of a single VLM prompt. Empty by default; mode
-# "precise" only becomes usable once this points at a running instance.
-DOCPARSER_HOST = os.environ.get("DOCPARSER_HOST", "").rstrip("/")
-# Generous default: the very first request ever made against docparser
-# also has to download its models (several minutes, more if the fast
-# mirrors are unreachable and it falls through to a slower one), on top
-# of running the two-stage pipeline itself on CPU. Later requests are
-# much faster once the models are cached, but this timeout has to cover
-# the worst case, not the common one.
-DOCPARSER_TIMEOUT = float(os.environ.get("DOCPARSER_TIMEOUT", "900"))
+REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "900"))
 
 MODE_PROMPTS = {
-    # PaddleOCR-VL's own documented element-level task prompts — plain
-    # strings, not chat/markdown instructions. Each one switches the model
-    # into a dedicated recognition head for that content type.
-    "text": "OCR:",
-    "table": "Table Recognition:",
-    "figure": "Chart Recognition:",
-    # Not one of PaddleOCR-VL's documented fixed prompts — this is a plain
-    # instruction to the underlying ERNIE language model, asking it to
-    # reproduce the page as structured Markdown instead of flat text. It's
-    # a single-pass, whole-image guess at layout (headings, lists, bold,
-    # tables), not the real bounding-box-based layout detection that
-    # PaddleOCR's own page-level `doc_parser` pipeline does — so it works
-    # well for simple documents but won't precisely reconstruct complex
-    # multi-column layouts.
-    "document": (
-        "Convert this document to Markdown. Preserve the structure: use "
-        "# / ## / ### for headings, - or 1. for lists, **bold** / *italic* "
-        "for emphasis, and Markdown tables for tabular data. Output only "
-        "the Markdown, no explanations or code fences."
-    ),
+    "text": "Free OCR.",
+    "table": "Parse the figure.",
+    "figure": "Parse the figure.",
+    "document": "<|grounding|>Convert the document to markdown.",
 }
 
 app = FastAPI(title="GLM-OCR service", version="1.0.0")
@@ -258,6 +225,14 @@ async def run_ocr(
                 # Leaving this block closes the connection; if we broke out
                 # early, that tells Ollama to cancel the in-progress request
                 # instead of letting it keep burning CPU in the background.
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Ollama did not return a token within {REQUEST_TIMEOUT:.0f} seconds. "
+                "The model may still be loading or the request is too large."
+            ),
+        )
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
@@ -265,44 +240,6 @@ async def run_ocr(
         )
 
     return "".join(chunks), stop_reason
-
-
-async def run_docparser(image_bytes: bytes, filename: str) -> tuple[str, float]:
-    """Sends the image to the companion docparser service (see docparser/
-    and the "precise" compose profile), which runs PaddleOCR's own
-    layout-aware doc_parser pipeline and returns real, structure-derived
-    Markdown — as opposed to run_ocr()'s single-prompt guess."""
-    if not DOCPARSER_HOST:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Mode 'precise' requires the optional docparser service, which "
-                "isn't configured (DOCPARSER_HOST is empty). It only runs on "
-                "amd64 — start it with `docker compose --profile precise up -d "
-                "--build` on an x86 machine."
-            ),
-        )
-
-    try:
-        async with httpx.AsyncClient(timeout=DOCPARSER_TIMEOUT) as client:
-            resp = await client.post(
-                f"{DOCPARSER_HOST}/parse",
-                files={"file": (filename or "input.png", image_bytes, "image/png")},
-            )
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not reach docparser at {DOCPARSER_HOST}: {exc}",
-        )
-
-    if resp.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"docparser returned {resp.status_code}: {resp.text[:500]}",
-        )
-
-    data = resp.json()
-    return data["markdown"], data.get("seconds", 0.0)
 
 
 # --- Endpoints --------------------------------------------------------------
@@ -359,7 +296,7 @@ def _ocr_response(
 async def ocr(
     request: Request,
     file: UploadFile = File(...),
-    mode: Literal["text", "table", "figure", "document", "precise"] = Form("text"),
+    mode: Literal["text", "table", "figure", "document"] = Form("text"),
     output: Literal["text", "json"] = Form("json"),
     max_megapixels: Optional[float] = Form(None),
     max_predict: Optional[int] = Form(None),
@@ -389,25 +326,6 @@ async def ocr(
         raise HTTPException(
             status_code=400,
             detail=f"max_predict must be between 64 and {NUM_PREDICT}",
-        )
-
-    if mode == "precise":
-        limit = max_megapixels if max_megapixels else DOCPARSER_MAX_MEGAPIXELS
-        resized = downscale_image(raw, limit)
-
-        started = time.time()
-        text, docparser_seconds = await run_docparser(resized, file.filename)
-        elapsed = round(time.time() - started, 2)
-
-        return _ocr_response(
-            text=text,
-            mode=mode,
-            model="PaddleOCR-VL (doc_parser pipeline)",
-            elapsed=docparser_seconds or elapsed,
-            filename=file.filename,
-            truncated=False,
-            warning=None,
-            output=output,
         )
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
@@ -469,7 +387,7 @@ async def api_info():
         "service": "glm-ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document|precise, output=json|text, max_megapixels, max_predict",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text, max_megapixels, max_predict",
             "GET /health": "checks connectivity to Ollama and whether the model is pulled",
         },
     }

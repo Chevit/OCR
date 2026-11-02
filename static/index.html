@@ -205,7 +205,6 @@
         <option value="table">Таблиця</option>
         <option value="figure">Фігура/схема</option>
         <option value="document">Документ (Markdown)</option>
-        <option value="precise">Документ (точний лейаут, лише x86)</option>
       </select>
       <button class="primary" id="runBtn" disabled>Розпізнати</button>
       <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
@@ -388,7 +387,7 @@
       }
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
-      isDocumentMode = data.mode === 'document' || data.mode === 'precise';
+      isDocumentMode = data.mode === 'document';
       viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
       if (isDocumentMode) {
         renderMarkdownPreview();
