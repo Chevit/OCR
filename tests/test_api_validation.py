@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.main import app, downscale_image
+from app.main import MODE_PROMPTS, OLLAMA_MODEL, app, downscale_image
 
 
 class OcrValidationTests(unittest.TestCase):
@@ -20,6 +20,13 @@ class OcrValidationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "max_megapixels must be greater than 0")
+
+    def test_defaults_to_deepseek_with_its_document_prompt(self):
+        self.assertEqual(OLLAMA_MODEL, "deepseek-ocr:latest")
+        self.assertEqual(
+            MODE_PROMPTS["document"],
+            "<|grounding|>Convert the document to markdown.",
+        )
 
     def test_rejects_oversized_image_before_decoding_it(self):
         image = Mock()
