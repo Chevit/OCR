@@ -50,7 +50,7 @@ class TesseractEngineTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             args = exec_.call_args.args
             self.assertEqual(args[:3], ("tesseract", "stdin", "stdout"))
-            self.assertEqual(args[args.index("-l") + 1], "ukr")
+            self.assertEqual(args[args.index("-l") + 1], "ukr+eng")
             self.assertEqual(args[args.index("--psm") + 1], psm, mode)
             self.assertIn("preserve_interword_spaces=1", args)
             self.assertTrue(proc.communicate.call_args.args[0].startswith(b"\x89PNG"))
@@ -58,7 +58,7 @@ class TesseractEngineTests(unittest.TestCase):
             body = response.json()
             self.assertEqual(body["text"], "Привіт\n\n\nHello")
             self.assertEqual(body["engine"], "tesseract")
-            self.assertEqual(body["model"], "tesseract (ukr)")
+            self.assertEqual(body["model"], "tesseract (ukr+eng)")
             self.assertFalse(body["truncated"])
 
     def test_timeout_kills_process_and_returns_504(self):

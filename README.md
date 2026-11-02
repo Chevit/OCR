@@ -5,7 +5,7 @@ with 16 GB RAM. It has two engines:
 
 | Engine | UI label | Speed on the Pi | Best for |
 | --- | --- | --- | --- |
-| `tesseract` | Швидко (Tesseract) | seconds | clean printed documents in Ukrainian |
+| `tesseract` | Швидко (Tesseract) | seconds | clean printed documents in Ukrainian and English |
 | `deepseek` | Точно (DeepSeek) | a minute or more | difficult photos, handwriting-like or mixed layouts, Markdown output |
 
 [Tesseract](https://github.com/tesseract-ocr/tesseract) runs inside the service
@@ -18,7 +18,7 @@ Ollama. Try Tesseract first; switch to DeepSeek when the text comes out wrong.
 sudo docker compose up -d --build
 sudo docker compose exec ollama ollama pull deepseek-ocr:latest
 curl http://localhost:8000/health
-sudo docker compose exec ocr tesseract --list-langs   # must list ukr
+sudo docker compose exec ocr tesseract --list-langs   # must list eng and ukr
 ```
 
 `/health` returns 503 when Ollama is unreachable, but its `tesseract` block
@@ -51,7 +51,7 @@ curl -X POST http://localhost:8000/ocr \
 `engine=deepseek|tesseract` (default `deepseek`), `max_megapixels`, and
 `max_predict`. `max_predict` applies to DeepSeek only. For Tesseract,
 `max_megapixels` overrides `TESSERACT_MAX_MEGAPIXELS`. The JSON response
-includes `engine` and `model` (for example `tesseract (ukr)`).
+includes `engine` and `model` (for example `tesseract (ukr+eng)`).
 
 For Tesseract, the mode selects the page segmentation mode (`--psm`): `text`
 and `document` use 3 (automatic layout), `table` uses 6 (one block read row by
@@ -76,7 +76,7 @@ Tesseract settings (environment variables):
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TESSERACT_CMD` | `tesseract` | Tesseract binary |
-| `TESSERACT_LANGS` | `ukr` | languages passed to `-l`; use `ukr+eng` for documents with much English text |
+| `TESSERACT_LANGS` | `ukr+eng` | languages passed to `-l` |
 | `TESSERACT_MAX_MEGAPIXELS` | `8` | largest image size sent to Tesseract |
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 
