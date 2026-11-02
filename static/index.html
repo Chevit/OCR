@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GLM-OCR</title>
+<link rel="stylesheet" href="/static/vendor/cropper.min.css">
 <style>
   :root {
     color-scheme: light dark;
@@ -61,13 +62,9 @@
   .dropzone strong { color: var(--text); }
   #fileInput { display: none; }
 
-  #preview {
-    max-width: 100%;
-    max-height: 260px;
-    border-radius: 8px;
-    margin-top: 14px;
-    display: none;
-  }
+  /* Cropper.js sizes its editor to this box, so it needs a fixed height. */
+  .crop-box { height: 70vh; margin-top: 14px; }
+  .crop-box img { display: block; max-width: 100%; }
 
   .row {
     display: flex;
@@ -191,7 +188,13 @@
       <p>PNG, JPG, WEBP</p>
       <input type="file" id="fileInput" accept="image/*">
     </div>
-    <img id="preview" alt="Прев'ю">
+    <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Прев'ю"></div>
+    <div class="row hidden" id="cropTools">
+      <button class="ghost" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
+      <button class="ghost" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
+      <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
+      <span class="profile-hint">Потягни за краї рамки, щоб обрізати зображення до потрібної частини</span>
+    </div>
 
     <div class="row">
       <select id="engine" aria-label="Рушій розпізнавання" title="Рушій розпізнавання">
@@ -231,12 +234,17 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.5/purify.min.js"></script>
+<!-- Served from this repo so the page works without internet access. -->
+<script src="/static/vendor/marked.min.js"></script>
+<script src="/static/vendor/purify.min.js"></script>
+<script src="/static/vendor/cropper.min.js"></script>
 <script>
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
   const preview = document.getElementById('preview');
+  const cropBox = document.getElementById('cropBox');
+  const cropTools = document.getElementById('cropTools');
+  const cropButtons = cropTools.querySelectorAll('button');
   const runBtn = document.getElementById('runBtn');
   const stopBtn = document.getElementById('stopBtn');
   const engineSel = document.getElementById('engine');
@@ -255,6 +263,8 @@
   let isDocumentMode = false;
   let showingRendered = false;
   let activeController = null;
+  let cropper = null;
+  let cropEdited = false; // untouched frame -> send the original file as is
   const profiles = {
     fast: { megapixels: 0.5, maxPredict: 512, hint: '0,5 МП · до 512 токенів' },
     balanced: { megapixels: 1, maxPredict: 1024, hint: '1 МП · до 1024 токенів' },
@@ -278,6 +288,8 @@
     stopBtn.disabled = !busy;
     stopBtn.classList.toggle('hidden', !busy);
     dropzone.classList.toggle('busy', busy);
+    cropButtons.forEach(b => { b.disabled = busy; });
+    if (cropper) busy ? cropper.disable() : cropper.enable();
   }
 
   function renderMarkdownPreview() {
@@ -337,11 +349,60 @@
       return;
     }
     selectedFile = file;
+    if (cropper) cropper.destroy();
+    if (preview.src) URL.revokeObjectURL(preview.src);
     preview.src = URL.createObjectURL(file);
-    preview.style.display = 'block';
+    cropBox.classList.remove('hidden');
+    cropTools.classList.remove('hidden');
+    cropEdited = false;
+    cropper = new Cropper(preview, {
+      viewMode: 1,            // keep the frame inside the image
+      autoCropArea: 1,        // start with the whole image selected
+      background: false,
+      zoomable: false,
+      movable: false,
+      // Modern browsers already apply the photo's EXIF rotation when drawing
+      // the image; letting Cropper.js apply it again would rotate it twice.
+      checkOrientation: false,
+      cropend: () => { cropEdited = true; },
+    });
     setBusy(false);
     setStatus('');
     resultPanel.classList.add('hidden');
+  }
+
+  // Cropper.js rotates the image in place, so a tall page turned sideways
+  // spills out of the editor. Fit it back in and select the whole image.
+  // The frame is dropped first: Cropper.js won't shrink the image below it.
+  function rotate(degrees) {
+    cropper.clear();
+    cropper.rotate(degrees);
+    const box = cropper.getContainerData();
+    const image = cropper.getCanvasData();
+    const k = Math.min(box.width / image.width, box.height / image.height);
+    const width = image.width * k, height = image.height * k;
+    cropper.setCanvasData({ left: (box.width - width) / 2, top: (box.height - height) / 2, width, height });
+    cropper.crop();
+    cropper.setCropBoxData(cropper.getCanvasData());
+    cropEdited = true;
+  }
+  document.getElementById('rotateLeftBtn').addEventListener('click', () => rotate(-90));
+  document.getElementById('rotateRightBtn').addEventListener('click', () => rotate(90));
+  document.getElementById('resetCropBtn').addEventListener('click', () => {
+    cropper.reset(); cropEdited = false;
+  });
+
+  // The crop is exported at the original resolution, not the preview's.
+  // JPEG keeps a full-page crop well under the 20 MB upload limit.
+  function imageToSend() {
+    if (!cropEdited) return Promise.resolve(selectedFile);
+    const canvas = cropper.getCroppedCanvas({ fillColor: '#fff', imageSmoothingQuality: 'high' });
+    const name = selectedFile.name.replace(/\.[^.]*$/, '') + '-crop.jpg';
+    return new Promise((resolve, reject) => canvas.toBlob(
+      blob => blob ? resolve(new File([blob], name, { type: 'image/jpeg' }))
+                   : reject(new Error('не вдалося обрізати зображення')),
+      'image/jpeg', 0.95,
+    ));
   }
 
   dropzone.addEventListener('click', () => fileInput.click());
@@ -388,7 +449,6 @@
     }, 1000);
 
     const form = new FormData();
-    form.append('file', selectedFile);
     form.append('mode', modeSel.value);
     form.append('output', 'json');
     form.append('engine', engineSel.value);
@@ -404,6 +464,7 @@
     }
 
     try {
+      form.append('file', await imageToSend());
       const resp = await fetch('/ocr', {
         method: 'POST', body: form, headers, signal: controller.signal,
       });
@@ -425,7 +486,8 @@
         setResultView(false);
       }
       if (data.truncated) {
-        setStatus('Готово за ' + data.seconds + ' с, але схоже на зациклення (обрізано за лімітом токенів)', 'err');
+        // The server's warning names the actual cause (loop, token limit, time limit).
+        setStatus('Готово за ' + data.seconds + ' с. ' + (data.warning || 'Текст може бути неповним.'), 'err');
       } else {
         setStatus('Готово за ' + data.seconds + ' с', 'ok');
       }
