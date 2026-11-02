@@ -8,7 +8,7 @@ import time
 from typing import Literal, Optional
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, Header, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -19,6 +19,12 @@ OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/"
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "AuditAid/PaddleOCR-VL-1.6-0.9B:latest")
 API_TOKEN = os.environ.get("API_TOKEN", "")  # empty = no auth required
 MAX_MEGAPIXELS = float(os.environ.get("MAX_MEGAPIXELS", "1.0"))
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+MAX_SOURCE_MEGAPIXELS = float(os.environ.get("MAX_SOURCE_MEGAPIXELS", "20"))
+# The docparser pipeline does its own layout detection and benefits from
+# more detail than the VLM-only path (which is tuned to avoid runaway
+# repetition on a 0.9B model) — so it gets a separate, higher default cap.
+DOCPARSER_MAX_MEGAPIXELS = float(os.environ.get("DOCPARSER_MAX_MEGAPIXELS", "4.0"))
 NUM_CTX = int(os.environ.get("NUM_CTX", "8192"))
 NUM_PREDICT = int(os.environ.get("NUM_PREDICT", "2048"))
 TEMPERATURE = float(os.environ.get("TEMPERATURE", "0"))
@@ -29,6 +35,19 @@ GEN_TIME_LIMIT = float(os.environ.get("GEN_TIME_LIMIT", "90"))
 # streamed response, not a total-duration cap — GEN_TIME_LIMIT is what
 # actually bounds how long a request takes overall.
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "180"))
+
+# Optional companion service (see docparser/ and the "precise" profile in
+# docker-compose.yml) that runs PaddleOCR's own layout-aware doc_parser
+# pipeline instead of a single VLM prompt. Empty by default; mode
+# "precise" only becomes usable once this points at a running instance.
+DOCPARSER_HOST = os.environ.get("DOCPARSER_HOST", "").rstrip("/")
+# Generous default: the very first request ever made against docparser
+# also has to download its models (several minutes, more if the fast
+# mirrors are unreachable and it falls through to a slower one), on top
+# of running the two-stage pipeline itself on CPU. Later requests are
+# much faster once the models are cached, but this timeout has to cover
+# the worst case, not the common one.
+DOCPARSER_TIMEOUT = float(os.environ.get("DOCPARSER_TIMEOUT", "900"))
 
 MODE_PROMPTS = {
     # PaddleOCR-VL's own documented element-level task prompts — plain
@@ -73,6 +92,21 @@ def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
     Feeding it much larger images is the #1 cause of runaway token repetition."""
     try:
         img = Image.open(io.BytesIO(raw))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read image: {exc}")
+
+    width, height = img.size
+    megapixels = (width * height) / 1_000_000
+    if megapixels > MAX_SOURCE_MEGAPIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Image must be at most {MAX_SOURCE_MEGAPIXELS:g} megapixels "
+                "before resizing"
+            ),
+        )
+
+    try:
         img.load()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read image: {exc}")
@@ -80,8 +114,6 @@ def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
 
-    width, height = img.size
-    megapixels = (width * height) / 1_000_000
     if megapixels > max_megapixels:
         scale = (max_megapixels / megapixels) ** 0.5
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
@@ -148,7 +180,9 @@ def collapse_repetition(text: str, min_streak: int = 4) -> tuple[str, bool]:
     return text, False
 
 
-async def run_ocr(image_bytes: bytes, mode: str) -> tuple[str, str]:
+async def run_ocr(
+    image_bytes: bytes, mode: str, request: Request, max_predict: int
+) -> tuple[str, str]:
     """Streams the response from Ollama instead of waiting for the whole
     thing at once. This lets us enforce a wall-clock time limit on
     generation (GEN_TIME_LIMIT) rather than only a token-count limit
@@ -173,7 +207,7 @@ async def run_ocr(image_bytes: bytes, mode: str) -> tuple[str, str]:
         "stream": True,
         "options": {
             "num_ctx": NUM_CTX,
-            "num_predict": NUM_PREDICT,
+            "num_predict": max_predict,
             "temperature": TEMPERATURE,
             "repeat_penalty": REPEAT_PENALTY,
             "repeat_last_n": REPEAT_LAST_N,
@@ -197,6 +231,13 @@ async def run_ocr(image_bytes: bytes, mode: str) -> tuple[str, str]:
                     )
 
                 async for line in resp.aiter_lines():
+                    # The web UI can cancel a long recognition. Once the
+                    # browser disconnects, close this stream too, which tells
+                    # Ollama to stop generating instead of consuming CPU for
+                    # a response that can no longer be delivered.
+                    if await request.is_disconnected():
+                        stop_reason = "client_cancelled"
+                        break
                     if not line.strip():
                         continue
                     obj = json.loads(line)
@@ -226,6 +267,44 @@ async def run_ocr(image_bytes: bytes, mode: str) -> tuple[str, str]:
     return "".join(chunks), stop_reason
 
 
+async def run_docparser(image_bytes: bytes, filename: str) -> tuple[str, float]:
+    """Sends the image to the companion docparser service (see docparser/
+    and the "precise" compose profile), which runs PaddleOCR's own
+    layout-aware doc_parser pipeline and returns real, structure-derived
+    Markdown — as opposed to run_ocr()'s single-prompt guess."""
+    if not DOCPARSER_HOST:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Mode 'precise' requires the optional docparser service, which "
+                "isn't configured (DOCPARSER_HOST is empty). It only runs on "
+                "amd64 — start it with `docker compose --profile precise up -d "
+                "--build` on an x86 machine."
+            ),
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=DOCPARSER_TIMEOUT) as client:
+            resp = await client.post(
+                f"{DOCPARSER_HOST}/parse",
+                files={"file": (filename or "input.png", image_bytes, "image/png")},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not reach docparser at {DOCPARSER_HOST}: {exc}",
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"docparser returned {resp.status_code}: {resp.text[:500]}",
+        )
+
+    data = resp.json()
+    return data["markdown"], data.get("seconds", 0.0)
+
+
 # --- Endpoints --------------------------------------------------------------
 
 @app.get("/health")
@@ -251,25 +330,93 @@ async def health():
     }
 
 
+def _ocr_response(
+    *,
+    text: str,
+    mode: str,
+    model: str,
+    elapsed: float,
+    filename: Optional[str],
+    truncated: bool,
+    warning: Optional[str],
+    output: str,
+):
+    if output == "text":
+        return PlainTextResponse(text)
+
+    return {
+        "text": text,
+        "mode": mode,
+        "model": model,
+        "seconds": elapsed,
+        "filename": filename,
+        "truncated": truncated,
+        "warning": warning,
+    }
+
+
 @app.post("/ocr")
 async def ocr(
+    request: Request,
     file: UploadFile = File(...),
-    mode: Literal["text", "table", "figure", "document"] = Form("text"),
+    mode: Literal["text", "table", "figure", "document", "precise"] = Form("text"),
     output: Literal["text", "json"] = Form("json"),
     max_megapixels: Optional[float] = Form(None),
+    max_predict: Optional[int] = Form(None),
     authorization: Optional[str] = Header(None),
 ):
     check_auth(authorization)
 
+    if request.headers.get("content-length") and int(request.headers["content-length"]) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload must be at most {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file upload")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload must be at most {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+
+    if max_megapixels is not None and max_megapixels <= 0:
+        raise HTTPException(status_code=400, detail="max_megapixels must be greater than 0")
+
+    if max_predict is not None and not 64 <= max_predict <= NUM_PREDICT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"max_predict must be between 64 and {NUM_PREDICT}",
+        )
+
+    if mode == "precise":
+        limit = max_megapixels if max_megapixels else DOCPARSER_MAX_MEGAPIXELS
+        resized = downscale_image(raw, limit)
+
+        started = time.time()
+        text, docparser_seconds = await run_docparser(resized, file.filename)
+        elapsed = round(time.time() - started, 2)
+
+        return _ocr_response(
+            text=text,
+            mode=mode,
+            model="PaddleOCR-VL (doc_parser pipeline)",
+            elapsed=docparser_seconds or elapsed,
+            filename=file.filename,
+            truncated=False,
+            warning=None,
+            output=output,
+        )
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
     resized = downscale_image(raw, limit)
 
     started = time.time()
-    text, stop_reason = await run_ocr(resized, mode)
+    text, stop_reason = await run_ocr(
+        resized, mode, request, max_predict or NUM_PREDICT
+    )
     elapsed = round(time.time() - started, 2)
 
     if mode == "document":
@@ -304,18 +451,16 @@ async def ocr(
     else:
         warning = None
 
-    if output == "text":
-        return PlainTextResponse(text)
-
-    return {
-        "text": text,
-        "mode": mode,
-        "model": OLLAMA_MODEL,
-        "seconds": elapsed,
-        "filename": file.filename,
-        "truncated": truncated,
-        "warning": warning,
-    }
+    return _ocr_response(
+        text=text,
+        mode=mode,
+        model=OLLAMA_MODEL,
+        elapsed=elapsed,
+        filename=file.filename,
+        truncated=truncated,
+        warning=warning,
+        output=output,
+    )
 
 
 @app.get("/api")
@@ -324,7 +469,7 @@ async def api_info():
         "service": "glm-ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document|precise, output=json|text, max_megapixels, max_predict",
             "GET /health": "checks connectivity to Ollama and whether the model is pulled",
         },
     }

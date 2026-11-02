@@ -99,9 +99,21 @@
   button.ghost { cursor: pointer; }
   button.ghost:hover { background: var(--bg); }
 
+  button.stop {
+    color: var(--err);
+    border-color: currentColor;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button.stop:hover { background: color-mix(in srgb, var(--err) 10%, var(--panel)); }
+  button.stop:disabled { opacity: .5; cursor: default; }
+
+  .dropzone.busy { cursor: wait; opacity: .6; pointer-events: none; }
+
   .status { font-size: 13px; margin-left: auto; color: var(--muted); }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
+  .profile-hint { color: var(--muted); font-size: 12px; }
 
   textarea {
     width: 100%;
@@ -182,13 +194,21 @@
     <img id="preview" alt="Прев'ю">
 
     <div class="row">
+      <select id="speedProfile" aria-label="Швидкість і якість" title="Швидкість і якість">
+        <option value="fast">Швидко</option>
+        <option value="balanced" selected>Збалансовано</option>
+        <option value="detailed">Точно</option>
+      </select>
+      <span class="profile-hint" id="profileHint"></span>
       <select id="mode">
         <option value="text">Текст</option>
         <option value="table">Таблиця</option>
         <option value="figure">Фігура/схема</option>
         <option value="document">Документ (Markdown)</option>
+        <option value="precise">Документ (точний лейаут, лише x86)</option>
       </select>
       <button class="primary" id="runBtn" disabled>Розпізнати</button>
+      <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
       <span class="status" id="status"></span>
     </div>
     <div class="row" id="tokenRow" style="margin-top:10px">
@@ -215,6 +235,9 @@
   const fileInput = document.getElementById('fileInput');
   const preview = document.getElementById('preview');
   const runBtn = document.getElementById('runBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const speedProfile = document.getElementById('speedProfile');
+  const profileHint = document.getElementById('profileHint');
   const modeSel = document.getElementById('mode');
   const statusEl = document.getElementById('status');
   const resultPanel = document.getElementById('resultPanel');
@@ -227,6 +250,30 @@
   let selectedFile = null;
   let isDocumentMode = false;
   let showingRendered = false;
+  let activeController = null;
+  const profiles = {
+    fast: { megapixels: 0.5, maxPredict: 512, hint: '0,5 МП · до 512 токенів' },
+    balanced: { megapixels: 1, maxPredict: 1024, hint: '1 МП · до 1024 токенів' },
+    detailed: { megapixels: 2, maxPredict: 2048, hint: '2 МП · до 2048 токенів' },
+  };
+
+  function selectedProfile() {
+    return profiles[speedProfile.value] || profiles.balanced;
+  }
+
+  function updateProfileHint() {
+    profileHint.textContent = selectedProfile().hint;
+  }
+
+  function setBusy(busy) {
+    runBtn.disabled = busy || !selectedFile;
+    modeSel.disabled = busy;
+    speedProfile.disabled = busy;
+    tokenInput.disabled = busy;
+    stopBtn.disabled = !busy;
+    stopBtn.classList.toggle('hidden', !busy);
+    dropzone.classList.toggle('busy', busy);
+  }
 
   function renderMarkdownPreview() {
     if (!window.marked || !window.DOMPurify) {
@@ -247,6 +294,8 @@
   }
 
   viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered));
+  speedProfile.addEventListener('change', updateProfileHint);
+  updateProfileHint();
 
   try {
     tokenInput.value = localStorage.getItem('glm_ocr_token') || '';
@@ -261,6 +310,7 @@
   }
 
   function pickFile(file) {
+    if (activeController) return;
     if (!file || !file.type.startsWith('image/')) {
       setStatus('Обери файл зображення', 'err');
       return;
@@ -268,7 +318,7 @@
     selectedFile = file;
     preview.src = URL.createObjectURL(file);
     preview.style.display = 'block';
-    runBtn.disabled = false;
+    setBusy(false);
     setStatus('');
     resultPanel.classList.add('hidden');
   }
@@ -301,7 +351,9 @@
 
   runBtn.addEventListener('click', async () => {
     if (!selectedFile) return;
-    runBtn.disabled = true;
+    const controller = new AbortController();
+    activeController = controller;
+    setBusy(true);
     resultPanel.classList.add('hidden');
 
     const startedAt = Date.now();
@@ -317,6 +369,9 @@
     form.append('file', selectedFile);
     form.append('mode', modeSel.value);
     form.append('output', 'json');
+    const profile = selectedProfile();
+    form.append('max_megapixels', profile.megapixels);
+    form.append('max_predict', profile.maxPredict);
 
     const headers = {};
     if (tokenInput.value.trim()) {
@@ -324,14 +379,16 @@
     }
 
     try {
-      const resp = await fetch('/ocr', { method: 'POST', body: form, headers });
+      const resp = await fetch('/ocr', {
+        method: 'POST', body: form, headers, signal: controller.signal,
+      });
       const data = await resp.json();
       if (!resp.ok) {
         throw new Error(data.detail || ('HTTP ' + resp.status));
       }
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
-      isDocumentMode = data.mode === 'document';
+      isDocumentMode = data.mode === 'document' || data.mode === 'precise';
       viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
       if (isDocumentMode) {
         renderMarkdownPreview();
@@ -345,11 +402,25 @@
         setStatus('Готово за ' + data.seconds + ' с', 'ok');
       }
     } catch (err) {
-      setStatus('Помилка: ' + err.message, 'err');
+      if (err.name === 'AbortError') {
+        setStatus('Розпізнавання зупинено');
+      } else {
+        setStatus('Помилка: ' + err.message, 'err');
+      }
     } finally {
       clearInterval(ticker);
-      runBtn.disabled = false;
+      if (activeController === controller) {
+        activeController = null;
+        setBusy(false);
+      }
     }
+  });
+
+  stopBtn.addEventListener('click', () => {
+    if (!activeController) return;
+    stopBtn.disabled = true;
+    setStatus('Зупиняю розпізнавання...');
+    activeController.abort();
   });
 
   copyBtn.addEventListener('click', async () => {

@@ -1,7 +1,7 @@
 services:
   ollama:
     image: ollama/ollama:latest
-    container_name: glm-ocr-ollama
+    container_name: ocr
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama
@@ -25,8 +25,33 @@ services:
       REPEAT_LAST_N: "128"
       GEN_TIME_LIMIT: "60"     # PaddleOCR-VL is a 0.9B model — same class as glm-ocr, faster per token than deepseek-ocr
       REQUEST_TIMEOUT: "180"   # stall guard only (no data for N seconds) — GEN_TIME_LIMIT bounds total time
+      # Points at the optional docparser service below. Harmless to leave
+      # set even when that service isn't running (e.g. on a Pi) — mode
+      # "precise" just fails with a clear connection error instead of
+      # working, until you start docparser on an amd64 host.
+      DOCPARSER_HOST: "http://docparser:8001"
+      DOCPARSER_TIMEOUT: "900"   # covers a slow first-run model download, not just steady-state inference
     ports:
       - "8000:8000"
 
+  # Optional, amd64-only "precise" document mode — runs PaddleOCR's own
+  # doc_parser pipeline (real layout detection + per-region recognition)
+  # instead of a single VLM prompt. PaddlePaddle has no ARM64 wheel, so
+  # this cannot run on Raspberry Pi; it sits behind the "precise" profile
+  # so a plain `docker compose up` (Pi included) never touches it.
+  # Enable explicitly on an x86 machine with:
+  #   docker compose --profile precise up -d --build
+  docparser:
+    build: ./docparser
+    platform: linux/amd64
+    container_name: glm-ocr-docparser
+    restart: unless-stopped
+    profiles: ["precise"]
+    volumes:
+      - docparser-paddlex:/root/.paddlex
+      - docparser-paddleocr:/root/.paddleocr
+
 volumes:
   ollama-data:
+  docparser-paddlex:
+  docparser-paddleocr:
