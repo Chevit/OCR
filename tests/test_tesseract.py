@@ -50,7 +50,7 @@ class TesseractEngineTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             args = exec_.call_args.args
             self.assertEqual(args[:3], ("tesseract", "stdin", "stdout"))
-            self.assertEqual(args[args.index("-l") + 1], "ukr+eng")
+            self.assertEqual(args[args.index("-l") + 1], "ukr")
             self.assertEqual(args[args.index("--psm") + 1], psm, mode)
             self.assertIn("preserve_interword_spaces=1", args)
             self.assertTrue(proc.communicate.call_args.args[0].startswith(b"\x89PNG"))
@@ -58,7 +58,7 @@ class TesseractEngineTests(unittest.TestCase):
             body = response.json()
             self.assertEqual(body["text"], "Привіт\n\n\nHello")
             self.assertEqual(body["engine"], "tesseract")
-            self.assertEqual(body["model"], "tesseract (ukr+eng)")
+            self.assertEqual(body["model"], "tesseract (ukr)")
             self.assertFalse(body["truncated"])
 
     def test_timeout_kills_process_and_returns_504(self):
@@ -107,12 +107,12 @@ FONT = next((f for f in CYRILLIC_FONTS if os.path.exists(f)), None)
 
 @unittest.skipUnless(_has_ukr() and FONT, "needs tesseract with 'ukr' and a Cyrillic font")
 class TesseractIntegrationTest(unittest.TestCase):
-    def test_recognizes_ukrainian_and_english(self):
+    def test_recognizes_ukrainian(self):
         img = Image.new("RGB", (1400, 300), "white")
         draw = ImageDraw.Draw(img)
         font = ImageFont.truetype(FONT, 64)
         draw.text((40, 40), "Привіт, лікарю", fill="black", font=font)
-        draw.text((40, 160), "Hello, doctor", fill="black", font=font)
+        draw.text((40, 160), "Діагноз: бронхіт", fill="black", font=font)
         buf = io.BytesIO()
         img.save(buf, format="PNG")
 
@@ -124,7 +124,7 @@ class TesseractIntegrationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("Привіт", response.json()["text"])
-        self.assertIn("Hello", response.json()["text"])
+        self.assertIn("Діагноз", response.json()["text"])
 
 
 if __name__ == "__main__":

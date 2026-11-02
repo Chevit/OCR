@@ -34,7 +34,7 @@ GEN_TIME_LIMIT = float(os.environ.get("GEN_TIME_LIMIT", "600"))
 REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "900"))
 
 TESSERACT_CMD = os.environ.get("TESSERACT_CMD", "tesseract")
-TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "ukr+eng")
+TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "ukr")
 # Unlike the LLM, Tesseract needs detail (~300 DPI): an A4 page at 300 DPI is ~8.7 MP.
 TESSERACT_MAX_MEGAPIXELS = float(os.environ.get("TESSERACT_MAX_MEGAPIXELS", "8"))
 TESSERACT_TIMEOUT = float(os.environ.get("TESSERACT_TIMEOUT", "120"))
