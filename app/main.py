@@ -127,7 +127,9 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
 
     width, height = img.size
     megapixels = (width * height) / 1_000_000
-    target = min(1.0, max_megapixels)
+    # Small images (e.g. photos compressed by a messenger) have text too small
+    # to read; enlarging them up to 2x roughly doubles the phrases recognized.
+    target = min(4.0, max_megapixels)
     if megapixels > max_megapixels:
         scale = (max_megapixels / megapixels) ** 0.5
     elif megapixels < target:

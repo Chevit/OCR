@@ -68,7 +68,8 @@ your documents, 4 is worth trying in `TESSERACT_PSM` in `app/main.py`.
   image around the text.
 - Tesseract straightens rotated phone photos, converts to grayscale, raises
   contrast, and keeps up to 8 MP (about a 300 DPI A4 scan) because it needs
-  detail. Images under 1 MP are enlarged up to 2x.
+  detail. Images under 4 MP (for example photos compressed by a messenger) are
+  enlarged up to 2x, which roughly doubles recognition quality for them.
 
 Tesseract settings (environment variables):
 
