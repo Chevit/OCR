@@ -50,6 +50,11 @@
   }
 
   .dropzone {
+    display: block;
+    width: 100%;
+    font: inherit;
+    color: inherit;
+    background: none;
     border: 2px dashed var(--border);
     border-radius: 10px;
     padding: 32px 16px;
@@ -58,12 +63,15 @@
     transition: border-color .15s, background .15s;
   }
   .dropzone.drag { border-color: var(--accent); background: rgba(47,111,237,.06); }
-  .dropzone p { margin: 6px 0; color: var(--muted); font-size: 14px; }
+  .dropzone > span { display: block; margin: 6px 0; color: var(--muted); font-size: 14px; }
+  /* Touch screens can't drag files or use a mouse wheel. */
+  .touch { display: none; }
+  @media (hover: none) { .touch { display: inline; } .mouse { display: none !important; } }
   .dropzone strong { color: var(--text); }
   #fileInput { display: none; }
 
   /* Cropper.js sizes its editor to this box, so it needs a fixed height. */
-  .crop-box { height: 70vh; margin-top: 14px; }
+  .crop-box { height: 60vh; margin-top: 14px; }
   .crop-box img { display: block; max-width: 100%; }
 
   .row {
@@ -74,7 +82,10 @@
     margin-top: 16px;
   }
 
-  select, button {
+  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .field-row { align-items: flex-end; }
+
+  select, button, input {
     font-size: 14px;
     padding: 9px 14px;
     border-radius: 8px;
@@ -93,6 +104,7 @@
   button.primary:hover { background: var(--accent-hover); }
   button.primary:disabled { opacity: .5; cursor: default; }
 
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.ghost { cursor: pointer; }
   button.ghost:hover { background: var(--bg); }
 
@@ -107,10 +119,12 @@
 
   .dropzone.busy { cursor: wait; opacity: .6; pointer-events: none; }
 
-  .status { font-size: 13px; margin-left: auto; color: var(--muted); }
+  .status { font-size: 14px; margin-top: 12px; color: var(--muted); }
+  .status:empty { display: none; }
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
   .profile-hint { color: var(--muted); font-size: 12px; }
+  #tokenInput { flex: 1; min-width: 220px; font-size: 13px; padding: 8px 10px; }
 
   textarea {
     width: 100%;
@@ -167,6 +181,7 @@
   .markdown-body.words { white-space: pre-wrap; }
   .conf-mid { background: rgba(255, 196, 0, .4); border-radius: 3px; }
   .conf-low { background: rgba(230, 50, 50, .4); border-radius: 3px; }
+  .markdown-body.words span[title] { cursor: help; }
 
   .hidden { display: none !important; }
   .spinner {
@@ -188,62 +203,77 @@
   <div class="sub">Завантаж зображення — отримай розпізнаний текст</div>
 
   <div class="panel">
-    <div class="dropzone" id="dropzone">
-      <p><strong>Перетягни зображення сюди</strong> або натисни, щоб обрати файл</p>
-      <p>PNG, JPG, WEBP</p>
-      <input type="file" id="fileInput" accept="image/*">
-    </div>
+    <button type="button" class="dropzone" id="dropzone">
+      <strong class="mouse">Перетягни зображення сюди або натисни, щоб обрати файл</strong>
+      <strong class="touch">Сфотографуй або обери зображення</strong>
+      <span>PNG, JPG, WEBP<span class="mouse">. Можна вставити знімок екрана: Ctrl+V / ⌘V</span></span>
+    </button>
+    <input type="file" id="fileInput" accept="image/*">
     <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Прев'ю"></div>
     <div class="row hidden" id="cropTools">
       <button class="ghost" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
       <button class="ghost" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
       <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
-      <span class="profile-hint">Потягни за краї рамки, щоб обрізати. Колесо миші — масштаб, перетягування зображення — рух</span>
+      <button class="ghost" id="otherFileBtn" type="button">Інше зображення</button>
+      <span class="profile-hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб.</span></span>
     </div>
 
+    <div class="row field-row">
+      <label class="field">Що на зображенні
+        <select id="mode">
+          <option value="text">Текст</option>
+          <option value="table">Таблиця</option>
+          <option value="figure">Схема або рисунок</option>
+          <option value="document">Документ</option>
+        </select>
+      </label>
+      <label class="field">Як розпізнати
+        <select id="engine">
+          <option value="tesseract" selected>Швидко, секунди (Tesseract)</option>
+          <option value="deepseek">Точно, хвилини (DeepSeek)</option>
+        </select>
+      </label>
+      <label class="field" id="speedField">Деталізація
+        <select id="speedProfile">
+          <option value="fast">Низька, швидше</option>
+          <option value="balanced" selected>Середня</option>
+          <option value="detailed">Висока, повільніше</option>
+        </select>
+      </label>
+      <label class="field" id="outputField">Що отримати
+        <select id="output">
+          <option value="json">Звичайний текст</option>
+          <option value="tsv">Текст з перевіркою слів</option>
+          <option value="pdf">PDF з текстовим шаром</option>
+        </select>
+      </label>
+    </div>
+    <div class="row hidden" id="tokenRow">
+      <label class="field" style="flex:1">Сервер вимагає API токен
+        <input type="password" id="tokenInput" autocomplete="off">
+      </label>
+    </div>
     <div class="row">
-      <select id="engine" aria-label="Рушій розпізнавання" title="Рушій розпізнавання">
-        <option value="tesseract" selected>Швидко (Tesseract)</option>
-        <option value="deepseek">Точно (DeepSeek)</option>
-      </select>
-      <select id="speedProfile" aria-label="Швидкість і якість" title="Швидкість і якість">
-        <option value="fast">Швидко</option>
-        <option value="balanced" selected>Збалансовано</option>
-        <option value="detailed">Точно</option>
-      </select>
-      <span class="profile-hint" id="profileHint"></span>
-      <select id="mode">
-        <option value="text">Текст</option>
-        <option value="table">Таблиця</option>
-        <option value="figure">Фігура/схема</option>
-        <option value="document">Документ (Markdown)</option>
-      </select>
-      <select id="output" aria-label="Результат" title="Результат">
-        <option value="json">Текст</option>
-        <option value="tsv">Текст з упевненістю слів</option>
-        <option value="pdf">PDF з текстовим шаром</option>
-      </select>
       <button class="primary" id="runBtn" disabled>Розпізнати</button>
       <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
-      <span class="status" id="status"></span>
+      <span class="profile-hint mouse">Ctrl+Enter / ⌘Enter</span>
     </div>
-    <div class="row" id="tokenRow" style="margin-top:10px">
-      <input type="password" id="tokenInput" placeholder="API токен (якщо увімкнено на сервері)"
-             style="flex:1; min-width:220px; font-size:13px; padding:8px 10px; border-radius:8px; border:1px solid var(--border); background:var(--panel); color:var(--text)">
-    </div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
   </div>
 
   <div class="panel hidden" id="resultPanel">
     <div class="row" style="margin-top:0">
       <strong>Результат</strong>
       <span class="profile-hint hidden" id="confLegend">
-        <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> — наведи на слово, щоб побачити впевненість
+        <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> Натисни на слово, щоб побачити впевненість
       </span>
-      <button class="ghost hidden" id="viewToggleBtn" style="margin-left:auto">Сирий Markdown</button>
-      <button class="ghost" id="copyBtn" style="margin-left:0">Скопіювати</button>
+      <span style="margin-left:auto"></span>
+      <button class="ghost hidden" id="viewToggleBtn">Сирий Markdown</button>
+      <button class="ghost" id="copyBtn">Скопіювати</button>
+      <button class="ghost" id="downloadBtn">Завантажити</button>
     </div>
     <div id="resultRendered" class="markdown-body hidden"></div>
-    <textarea id="resultText" readonly></textarea>
+    <textarea id="resultText" aria-label="Розпізнаний текст, можна редагувати"></textarea>
   </div>
 </div>
 
@@ -262,7 +292,6 @@
   const stopBtn = document.getElementById('stopBtn');
   const engineSel = document.getElementById('engine');
   const speedProfile = document.getElementById('speedProfile');
-  const profileHint = document.getElementById('profileHint');
   const modeSel = document.getElementById('mode');
   const outputSel = document.getElementById('output');
   const confLegend = document.getElementById('confLegend');
@@ -273,6 +302,12 @@
   const viewToggleBtn = document.getElementById('viewToggleBtn');
   const copyBtn = document.getElementById('copyBtn');
   const tokenInput = document.getElementById('tokenInput');
+  const tokenRow = document.getElementById('tokenRow');
+  const speedField = document.getElementById('speedField');
+  const outputField = document.getElementById('outputField');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const docOption = modeSel.querySelector('option[value="document"]');
+  const fmtSeconds = s => Number(s).toLocaleString('uk', { maximumFractionDigits: 1 });
 
   let selectedFile = null;
   let isDocumentMode = false;
@@ -280,17 +315,13 @@
   let activeController = null;
   let cropper = null;
   const profiles = {
-    fast: { megapixels: 0.5, maxPredict: 512, hint: '0,5 МП · до 512 токенів' },
-    balanced: { megapixels: 1, maxPredict: 1024, hint: '1 МП · до 1024 токенів' },
-    detailed: { megapixels: 2, maxPredict: 2048, hint: '2 МП · до 2048 токенів' },
+    fast: { megapixels: 0.5, maxPredict: 512 },
+    balanced: { megapixels: 1, maxPredict: 1024 },
+    detailed: { megapixels: 2, maxPredict: 2048 },
   };
 
   function selectedProfile() {
     return profiles[speedProfile.value] || profiles.balanced;
-  }
-
-  function updateProfileHint() {
-    profileHint.textContent = selectedProfile().hint;
   }
 
   function setBusy(busy) {
@@ -323,17 +354,24 @@
   }
 
   viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered && renderMarkdownPreview()));
-  speedProfile.addEventListener('change', updateProfileHint);
-  updateProfileHint();
 
   // The speed profile only tunes DeepSeek (image size, token limit).
   function updateEngineUi() {
     const isDeepseek = engineSel.value === 'deepseek';
-    speedProfile.classList.toggle('hidden', !isDeepseek);
-    profileHint.classList.toggle('hidden', !isDeepseek);
+    speedField.classList.toggle('hidden', !isDeepseek);
     // Word confidence and PDF come from Tesseract only.
-    outputSel.classList.toggle('hidden', isDeepseek);
+    outputField.classList.toggle('hidden', isDeepseek);
+    // Only DeepSeek returns Markdown.
+    docOption.textContent = isDeepseek ? 'Документ (Markdown)' : 'Документ';
+    updateRunLabel();
   }
+
+  // The button names what it will produce.
+  function updateRunLabel() {
+    const pdf = engineSel.value !== 'deepseek' && outputSel.value === 'pdf';
+    runBtn.textContent = pdf ? 'Створити PDF' : 'Розпізнати';
+  }
+  outputSel.addEventListener('change', updateRunLabel);
 
   // Confidence (0-100) at or above which a word counts as sure / doubtful.
   const CONF_SURE = 85, CONF_DOUBT = 60;
@@ -362,7 +400,7 @@
         if (j) resultRendered.append(' ');
         const span = document.createElement('span');
         span.textContent = w.text;
-        span.title = 'Впевненість: ' + Math.round(w.conf) + '%';
+        span.title = '«' + w.text + '»: впевненість ' + Math.round(w.conf) + '%';
         if (w.conf < CONF_DOUBT) span.className = 'conf-low';
         else if (w.conf < CONF_SURE) span.className = 'conf-mid';
         resultRendered.append(span);
@@ -391,6 +429,7 @@
   try {
     tokenInput.value = localStorage.getItem('ocr_token') || '';
   } catch {}
+  tokenRow.classList.toggle('hidden', !tokenInput.value);
   tokenInput.addEventListener('change', () => {
     try { localStorage.setItem('ocr_token', tokenInput.value); } catch {}
   });
@@ -426,6 +465,7 @@
       // the image; letting Cropper.js apply it again would rotate it twice.
       checkOrientation: false,
     });
+    dropzone.classList.add('hidden');
     setBusy(false);
     setStatus('');
     resultPanel.classList.add('hidden');
@@ -447,6 +487,7 @@
   }
   document.getElementById('rotateLeftBtn').addEventListener('click', () => rotate(-90));
   document.getElementById('rotateRightBtn').addEventListener('click', () => rotate(90));
+  document.getElementById('otherFileBtn').addEventListener('click', () => fileInput.click());
   document.getElementById('resetCropBtn').addEventListener('click', () => {
     cropper.reset();
   });
@@ -470,7 +511,10 @@
   }
 
   dropzone.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => pickFile(e.target.files[0]));
+  fileInput.addEventListener('change', (e) => {
+    pickFile(e.target.files[0]);
+    fileInput.value = '';  // picking the same file again still fires 'change'
+  });
 
   ['dragenter', 'dragover'].forEach(evt =>
     dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('drag'); })
@@ -506,6 +550,7 @@
     const startedAt = Date.now();
     statusEl.className = 'status';
     statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... 0 с';
+    statusEl.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() });
     const ticker = setInterval(() => {
       const s = Math.round((Date.now() - startedAt) / 1000);
       statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... ' + s + ' с'
@@ -533,18 +578,23 @@
       const resp = await fetch('/ocr', {
         method: 'POST', body: form, headers, signal: controller.signal,
       });
+      if (resp.status === 401) {
+        tokenRow.classList.remove('hidden');
+        tokenInput.focus();
+        throw new Error('сервер вимагає API токен. Введи його й натисни «' + runBtn.textContent + '» ще раз');
+      }
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         throw new Error(typeof data.detail === 'string'
           ? data.detail
           : 'сервер повернув помилку (HTTP ' + resp.status + ')');
       }
-      const seconds = Math.round((Date.now() - startedAt) / 100) / 10;
+      const seconds = fmtSeconds((Date.now() - startedAt) / 1000);
       resultRendered.classList.toggle('words', output === 'tsv');
       confLegend.classList.toggle('hidden', output !== 'tsv');
       if (output === 'pdf') {
         download(await resp.blob(), selectedFile.name.replace(/\.[^.]*$/, '') + '.pdf');
-        setStatus('PDF завантажено за ' + seconds + ' с', 'ok');
+        setStatus('PDF створено за ' + seconds + ' с', 'ok');
         return;
       }
       if (output === 'tsv') {
@@ -555,6 +605,7 @@
         resultRendered.classList.remove('hidden');
         resultText.classList.add('hidden');
         setStatus('Готово за ' + seconds + ' с', 'ok');
+        showResult();
         return;
       }
       const data = await resp.json();
@@ -570,10 +621,11 @@
       }
       if (data.truncated) {
         // The server's warning names the actual cause (loop, token limit, time limit).
-        setStatus('Готово за ' + data.seconds + ' с. ' + (data.warning || 'Текст може бути неповним.'), 'err');
+        setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с. ' + (data.warning || 'Текст може бути неповним.'), 'err');
       } else {
-        setStatus('Готово за ' + data.seconds + ' с', 'ok');
+        setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с', 'ok');
       }
+      showResult();
     } catch (err) {
       if (err.name === 'AbortError') {
         setStatus('Розпізнавання зупинено');
@@ -587,6 +639,27 @@
         setBusy(false);
       }
     }
+  });
+
+  const scrollBehavior = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  function showResult() {
+    resultPanel.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
+  }
+
+  // Ctrl/Cmd+Enter starts recognition from anywhere, including the textarea.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !runBtn.disabled) runBtn.click();
+  });
+
+  // Tooltips don't show on touch screens, so a tap shows the confidence too.
+  resultRendered.addEventListener('click', (e) => {
+    if (resultRendered.classList.contains('words') && e.target.title) setStatus(e.target.title);
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    const ext = isDocumentMode ? '.md' : '.txt';
+    download(new Blob([resultText.value], { type: 'text/plain;charset=utf-8' }),
+      selectedFile.name.replace(/\.[^.]*$/, '') + ext);
   });
 
   stopBtn.addEventListener('click', () => {
