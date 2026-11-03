@@ -1,32 +1,9 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
-    volumes:
-      - ollama-data:/root/.ollama
-    ports:
-      - '11434:11434' # optional: expose only if you want direct access to Ollama itself
-
   ocr:
     build: .
     container_name: ocr-service
     restart: unless-stopped
-    depends_on:
-      - ollama
-    environment:
-      OLLAMA_HOST: 'http://ollama:11434'
-      OLLAMA_MODEL: 'deepseek-ocr:latest'
-      # API_TOKEN: "set-a-secret-here"   # uncomment to require a bearer token
-      MAX_MEGAPIXELS: '1.0'
-      NUM_CTX: '8192'
-      NUM_PREDICT: '2048'
-      REPEAT_PENALTY: '1.15'
-      REPEAT_LAST_N: '128'
-      GEN_TIME_LIMIT: '600'
-      REQUEST_TIMEOUT: '900' # waits for slow first tokens on a CPU-only Pi
+    # environment:
+    #   API_TOKEN: "set-a-secret-here"   # uncomment to require a bearer token
     ports:
       - '8000:8000'
-
-volumes:
-  ollama-data:

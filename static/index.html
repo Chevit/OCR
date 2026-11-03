@@ -387,21 +387,6 @@
             </div>
           </fieldset>
           <fieldset class="group">
-            <legend>Як розпізнати</legend>
-            <div class="seg">
-              <label><input type="radio" name="engine" value="tesseract" checked><span>Швидко<small>секунди, Tesseract</small></span></label>
-              <label><input type="radio" name="engine" value="deepseek"><span>ШІ-модель<small>хвилини, DeepSeek</small></span></label>
-            </div>
-          </fieldset>
-          <fieldset class="group" id="speedField">
-            <legend>Деталізація</legend>
-            <div class="seg">
-              <label><input type="radio" name="speedProfile" value="fast"><span>Низька<small>швидше</small></span></label>
-              <label><input type="radio" name="speedProfile" value="balanced" checked><span>Середня<small>&nbsp;</small></span></label>
-              <label><input type="radio" name="speedProfile" value="detailed"><span>Висока<small>повільніше</small></span></label>
-            </div>
-          </fieldset>
-          <fieldset class="group" id="outputField">
             <legend>Що отримати</legend>
             <div class="seg">
               <label><input type="radio" name="output" value="json" checked><span>Текст</span></label>
@@ -462,7 +447,7 @@
   // Radio groups: .value reads and sets the checked option.
   const settingsForm = document.getElementById('settingsForm');
   const settings = document.getElementById('settings');
-  const { engine: engineSel, speedProfile, mode: modeSel, output: outputSel } = settingsForm.elements;
+  const { mode: modeSel, output: outputSel } = settingsForm.elements;
   const wordTools = document.getElementById('wordTools');
   const wordInfo = document.getElementById('wordInfo');
   const midCount = document.getElementById('midCount');
@@ -475,8 +460,6 @@
   const copyBtn = document.getElementById('copyBtn');
   const tokenInput = document.getElementById('tokenInput');
   const tokenRow = document.getElementById('tokenRow');
-  const speedField = document.getElementById('speedField');
-  const outputField = document.getElementById('outputField');
   const downloadBtn = document.getElementById('downloadBtn');
   const settingsSummary = document.getElementById('settingsSummary');
   const summaryText = document.getElementById('summaryText');
@@ -488,16 +471,6 @@
   let savedCrop = null;      // the last applied frame and rotation
   let activeController = null;
   let cropper = null;        // lives only while the crop window is open
-  const profiles = {
-    fast: { megapixels: 0.5, maxPredict: 512 },
-    balanced: { megapixels: 1, maxPredict: 1024 },
-    detailed: { megapixels: 2, maxPredict: 2048 },
-  };
-
-  function selectedProfile() {
-    return profiles[speedProfile.value] || profiles.balanced;
-  }
-
   function setBusy(busy) {
     runBtn.disabled = busy || !selectedFile;
     settings.disabled = busy;
@@ -506,14 +479,6 @@
     stopBtn.classList.toggle('hidden', !busy);
     dropzone.classList.toggle('busy', busy);
     imageButtons.forEach(b => { b.disabled = busy; });
-  }
-
-  // The speed profile only tunes DeepSeek (image size, token limit).
-  function updateEngineUi() {
-    const isDeepseek = engineSel.value === 'deepseek';
-    speedField.classList.toggle('hidden', !isDeepseek);
-    // Word confidence comes from Tesseract only.
-    outputField.classList.toggle('hidden', isDeepseek);
   }
 
   // Confidence (0-100) at or above which a word counts as sure / doubtful.
@@ -644,19 +609,10 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
-  try {
-    const savedEngine = localStorage.getItem('ocr_engine');
-    if ([...engineSel].some(r => r.value === savedEngine)) engineSel.value = savedEngine;
-  } catch {}
-  settingsForm.addEventListener('change', (e) => {
-    if (e.target.name === 'engine') {
-      try { localStorage.setItem('ocr_engine', engineSel.value); } catch {}
-    }
-    updateEngineUi();
+  settingsForm.addEventListener('change', () => {
     // The result on screen came from the old settings.
     if (!resultPanel.classList.contains('hidden')) resultPanel.classList.add('stale');
   });
-  updateEngineUi();
 
   try {
     tokenInput.value = localStorage.getItem('ocr_token') || '';
@@ -846,28 +802,20 @@
     if (showingPage) showSelection(sendFile);
     resultPanel.classList.add('hidden');
 
-    const isDeepseek = engineSel.value === 'deepseek';
     const startedAt = Date.now();
     statusEl.className = 'status';
     statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... 0 с';
     statusEl.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() });
     const ticker = setInterval(() => {
       const s = Math.round((Date.now() - startedAt) / 1000);
-      statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... ' + s + ' с'
-        + (isDeepseek && s > 60 ? ' (на слабкому залізі це може тривати кілька хвилин)' : '');
+      statusEl.innerHTML = '<span class="spinner"></span>Розпізнаю... ' + s + ' с';
     }, 1000);
 
     const form = new FormData();
     form.append('mode', modeSel.value);
     // Word check asks for "words": the TSV plus the page its boxes refer to.
-    const output = isDeepseek ? 'json' : outputSel.value === 'tsv' ? 'words' : outputSel.value;
+    const output = outputSel.value === 'tsv' ? 'words' : outputSel.value;
     form.append('output', output);
-    form.append('engine', engineSel.value);
-    if (isDeepseek) {
-      const profile = selectedProfile();
-      form.append('max_megapixels', profile.megapixels);
-      form.append('max_predict', profile.maxPredict);
-    }
 
     const headers = {};
     if (tokenInput.value.trim()) {
@@ -913,12 +861,7 @@
       resultPanel.classList.remove('hidden');
       resultRendered.classList.add('hidden');
       resultText.classList.remove('hidden');
-      if (data.truncated) {
-        // The server's warning names the actual cause (loop, token limit, time limit).
-        setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с. ' + (data.warning || 'Текст може бути неповним.'), 'err');
-      } else {
-        setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с', 'ok');
-      }
+      setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с', 'ok');
       showResult();
     } catch (err) {
       if (err.name === 'AbortError') {
@@ -944,9 +887,8 @@
     settingsForm.classList.toggle('hidden', !open);
     settingsSummary.classList.toggle('hidden', open);
     if (open) return;
-    const parts = [checkedLabel('mode'), checkedLabel('engine')];
-    if (engineSel.value === 'deepseek') parts.push('деталізація ' + checkedLabel('speedProfile').toLowerCase());
-    else if (outputSel.value === 'tsv') parts.push('з перевіркою слів');
+    const parts = [checkedLabel('mode')];
+    if (outputSel.value === 'tsv') parts.push('з перевіркою слів');
     summaryText.textContent = parts.join(', ');
   }
   document.getElementById('changeSettingsBtn').addEventListener('click', () => {

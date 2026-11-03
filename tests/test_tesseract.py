@@ -36,16 +36,16 @@ class TesseractEngineTests(unittest.TestCase):
         with patch("app.main.detect_rotation", AsyncMock(return_value=0)):
             return self.client.post(
                 "/ocr",
-                data={"engine": "tesseract", **data},
+                data=data,
                 files={"file": ("sample.png", png_bytes(), "image/png")},
             )
 
-    def test_rejects_unknown_engine(self):
-        response = self.post(engine="glm")
+    def test_rejects_removed_modes(self):
+        response = self.post(mode="document")
         self.assertEqual(response.status_code, 422)
 
     def test_passes_languages_and_psm_per_mode(self):
-        for mode, psm in {"text": "3", "table": "6", "figure": "11", "document": "3"}.items():
+        for mode, psm in {"text": "3", "table": "6"}.items():
             proc = fake_process(stdout="Привіт  \n\n\n\n\nHello\f".encode())
             with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as exec_:
                 response = self.post(mode=mode)
@@ -60,9 +60,7 @@ class TesseractEngineTests(unittest.TestCase):
 
             body = response.json()
             self.assertEqual(body["text"], "Привіт\n\n\nHello")
-            self.assertEqual(body["engine"], "tesseract")
             self.assertEqual(body["model"], "tesseract (ukr+eng)")
-            self.assertFalse(body["truncated"])
 
     def test_tsv_output_returns_raw_tesseract_file(self):
         body = b"level\tpage_num\n5\t1\n"
@@ -94,14 +92,6 @@ class TesseractEngineTests(unittest.TestCase):
     def test_pdf_output_is_rejected(self):
         response = self.post(output="pdf")
         self.assertEqual(response.status_code, 422)
-
-    def test_tsv_is_rejected_for_deepseek(self):
-        response = self.client.post(
-            "/ocr",
-            data={"engine": "deepseek", "output": "tsv"},
-            files={"file": ("sample.png", png_bytes(), "image/png")},
-        )
-        self.assertEqual(response.status_code, 400)
 
     def test_timeout_kills_process_and_returns_504(self):
         async def hang(_):
@@ -185,7 +175,6 @@ class TesseractIntegrationTest(unittest.TestCase):
 
         response = TestClient(app).post(
             "/ocr",
-            data={"engine": "tesseract"},
             files={"file": ("sample.png", buf.getvalue(), "image/png")},
         )
 

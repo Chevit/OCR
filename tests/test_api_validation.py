@@ -4,14 +4,14 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.main import MODE_PROMPTS, OLLAMA_MODEL, app, downscale_image
+from app.main import app, open_image
 
 
 class OcrValidationTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
 
-    def test_rejects_non_positive_image_limit_before_calling_ollama(self):
+    def test_rejects_non_positive_image_limit_before_running_ocr(self):
         response = self.client.post(
             "/ocr",
             data={"max_megapixels": "-1"},
@@ -21,22 +21,27 @@ class OcrValidationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "max_megapixels має бути більше 0")
 
-    def test_defaults_to_deepseek_with_its_document_prompt(self):
-        self.assertEqual(OLLAMA_MODEL, "deepseek-ocr:latest")
-        self.assertEqual(
-            MODE_PROMPTS["document"],
-            "<|grounding|>Convert the document to markdown.",
-        )
-
     def test_rejects_oversized_image_before_decoding_it(self):
         image = Mock()
         image.size = (5_000, 5_000)
 
         with patch("app.main.Image.open", return_value=image):
             with self.assertRaisesRegex(HTTPException, "не більше"):
-                downscale_image(b"header only", 1)
+                open_image(b"header only")
 
         image.load.assert_not_called()
+
+
+class HealthTests(unittest.TestCase):
+    def test_returns_503_when_tesseract_is_unusable(self):
+        from unittest.mock import AsyncMock
+
+        status = {"available": False, "version": None, "langs": [], "missing_langs": ["ukr"]}
+        with patch("app.main.tesseract_status", AsyncMock(return_value=status)):
+            response = TestClient(app).get("/health")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["status"], "tesseract_unavailable")
 
 
 class CancelOnDisconnectTests(unittest.TestCase):
