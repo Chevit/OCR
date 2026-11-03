@@ -579,10 +579,11 @@
     if (span) showWord(span);
   });
 
-  // An edited word counts as checked: its mark goes away.
+  // An edited word counts as checked: its mark goes away. It stays current,
+  // so "next" carries on from it.
   resultRendered.addEventListener('input', () => {
     for (const span of resultRendered.querySelectorAll('[data-conf]')) {
-      if (span.textContent !== span.dataset.orig) span.classList.remove('conf-mid', 'conf-low', 'current');
+      if (span.textContent !== span.dataset.orig) span.classList.remove('conf-mid', 'conf-low');
     }
     updateWordCounts();
   });
@@ -591,7 +592,8 @@
     const words = flaggedWords();
     if (!words.length) return;
     const current = resultRendered.querySelector('.current');
-    const span = words[(words.indexOf(current) + 1) % words.length];
+    // The first flagged word after the current one in reading order, wrapping around.
+    const span = words.find(w => current?.compareDocumentPosition(w) & Node.DOCUMENT_POSITION_FOLLOWING) || words[0];
     showWord(span);
     span.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() });
     // Select the word, so typing replaces it.
