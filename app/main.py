@@ -6,12 +6,11 @@ import json
 import os
 import re
 import time
-from urllib.parse import quote
 from typing import Literal, Optional
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 
@@ -218,7 +217,7 @@ async def tesseract_ocr(
     raw: bytes, mode: str, max_megapixels: float, renderer: Optional[str] = None
 ) -> bytes:
     """Returns Tesseract's raw output: plain text by default, or the file of
-    the given renderer ("tsv" = words with confidence, "pdf" = searchable PDF)."""
+    the given renderer ("tsv" = words with confidence)."""
     # Image work runs in a thread so a big photo doesn't stall other requests.
     image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
     rotation = await detect_rotation(image_png)
@@ -236,9 +235,6 @@ async def run_tesseract(image_png: bytes, mode: str, renderer: Optional[str] = N
             "-l", TESSERACT_LANGS,
             "--psm", str(TESSERACT_PSM[mode]),
             "-c", "preserve_interword_spaces=1",
-            # The prepared PNG carries no DPI; without one a PDF page comes out
-            # at 70 DPI (a meter wide). 300 matches TESSERACT_MAX_MEGAPIXELS' A4.
-            *(["--dpi", "300"] if renderer == "pdf" else []),
             *([renderer] if renderer else []),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -533,7 +529,7 @@ async def ocr(
     request: Request,
     file: UploadFile = File(...),
     mode: Literal["text", "table", "figure", "document"] = Form("text"),
-    output: Literal["text", "json", "tsv", "pdf"] = Form("json"),
+    output: Literal["text", "json", "tsv"] = Form("json"),
     engine: Literal["deepseek", "tesseract"] = Form("deepseek"),
     max_megapixels: Optional[float] = Form(None),
     max_predict: Optional[int] = Form(None),
@@ -561,19 +557,12 @@ async def ocr(
 
     if engine == "tesseract":
         # max_predict is a DeepSeek setting and is ignored here.
-        renderer = output if output in ("tsv", "pdf") else None
+        renderer = "tsv" if output == "tsv" else None
         started = time.time()
         out = await cancel_on_disconnect(
             request,
             tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer),
         )
-        if output == "pdf":
-            name = os.path.splitext(file.filename or "ocr")[0] + ".pdf"
-            return Response(
-                out,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
-            )
         if output == "tsv":
             return PlainTextResponse(
                 out.decode("utf-8", errors="replace"),
@@ -591,8 +580,8 @@ async def ocr(
             output=output,
         )
 
-    if output in ("tsv", "pdf"):
-        raise HTTPException(status_code=400, detail=f"output={output} доступний лише для Tesseract")
+    if output == "tsv":
+        raise HTTPException(status_code=400, detail="output=tsv доступний лише для Tesseract")
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
     resized = await asyncio.to_thread(downscale_image, raw, limit)
@@ -654,7 +643,7 @@ async def api_info():
         "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text|tsv|pdf (tsv/pdf: Tesseract only), engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text|tsv (tsv: Tesseract only), engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
             "GET /health": "checks Ollama (and whether the model is pulled) and Tesseract languages",
         },
     }

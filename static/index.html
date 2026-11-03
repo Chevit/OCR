@@ -19,6 +19,9 @@
     --lamp-hover: #006B5A;
     --on-lamp: #FFFFFF;
     --err: #B42318;
+    --doubt: #B45309;                      /* dotted underline: doubtful word */
+    --wrong-bg: rgba(220, 38, 38, .14);    /* fill: likely error */
+    --wrong-line: #DC2626;
     --reading: "PT Serif", "Noto Serif", Georgia, serif;
   }
   @media (prefers-color-scheme: dark) {
@@ -33,6 +36,9 @@
       --lamp-hover: #4CC9B2;
       --on-lamp: #06201B;
       --err: #F97066;
+      --doubt: #F5B54A;
+      --wrong-bg: rgba(249, 112, 102, .22);
+      --wrong-line: #F97066;
     }
   }
   * { box-sizing: border-box; }
@@ -103,7 +109,11 @@
     border-radius: 14px;
     overflow: hidden;
   }
-  @media (max-width: 959px) { .crop-box { height: 55vh; } }
+  @media (max-width: 959px) {
+    .crop-box { height: 40vh; }
+    .tools button { min-height: 44px; }
+    #runBtn { flex: 1 1 100%; min-height: 48px; }
+  }
   .crop-box img { display: block; max-width: 100%; }
   .crop-box .cropper-modal { background: var(--glass); opacity: .6; }
   .crop-box .cropper-view-box { outline-color: var(--lamp); }
@@ -182,7 +192,7 @@
   button { cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
   button.ghost:hover:not(:disabled) { background: var(--bed); }
-  button.icon { min-width: 40px; font-size: 20px; line-height: 1; padding: 6px 10px; }
+  button.icon { min-width: 40px; padding: 6px 10px; display: inline-flex; align-items: center; justify-content: center; }
 
   /* Stays in reach at the bottom of the screen on long pages and phones. */
   .run-bar {
@@ -230,7 +240,17 @@
   .result-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   .result-head h2 { font-size: 16px; margin: 0 auto 0 0; }
   .result-head button { font-size: 13px; padding: 6px 10px; }
-  #confLegend { width: 100%; order: 5; }
+  .stale-note { display: none; width: 100%; order: 5; margin: 0; color: var(--err); }
+  .result.stale .stale-note { display: block; }
+  .result.stale .transcript, .result.stale textarea { opacity: .5; }
+
+  .word-bar {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 8px 10px; margin-bottom: 8px;
+    background: var(--bed); border-radius: 10px; font-size: 13px;
+  }
+  .word-bar button { margin-left: auto; font-size: 13px; padding: 6px 12px; color: var(--lamp); border-color: var(--lamp); font-weight: 600; background: transparent; }
+  #wordInfo { margin: 0 0 10px; }
 
   /* The transcript is set for reading and proofreading, not as code. */
   textarea, .transcript {
@@ -253,9 +273,15 @@
 
   /* Tesseract word confidence: sure words stay unmarked. */
   .transcript.words { white-space: pre-wrap; }
-  .transcript.words span[title] { cursor: help; }
-  .conf-mid { background: rgba(255, 196, 0, .4); border-radius: 3px; }
-  .conf-low { background: rgba(230, 50, 50, .4); border-radius: 3px; }
+  .transcript.words:focus-visible { outline: 1px dashed var(--line); outline-offset: 6px; }
+  /* The two kinds differ in shape, not just color. */
+  .conf-mid {
+    text-decoration: underline dotted var(--doubt);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 4px;
+  }
+  .conf-low { background: var(--wrong-bg); box-shadow: inset 0 -2px var(--wrong-line); border-radius: 3px; }
+  .transcript .current { outline: 2px solid var(--lamp); outline-offset: 2px; border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -275,8 +301,8 @@
     <input type="file" id="fileInput" accept="image/*">
     <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Обране зображення"></div>
     <div class="tools hidden" id="cropTools">
-      <button class="ghost icon" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
-      <button class="ghost icon" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
+      <button class="ghost icon" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+      <button class="ghost icon" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button>
       <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
       <button class="ghost" id="otherFileBtn" type="button">Інше зображення</button>
       <span class="hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб.</span></span>
@@ -314,7 +340,6 @@
             <div class="seg">
               <label><input type="radio" name="output" value="json" checked><span>Текст</span></label>
               <label><input type="radio" name="output" value="tsv"><span>Текст з перевіркою слів</span></label>
-              <label><input type="radio" name="output" value="pdf"><span>PDF з текстовим шаром</span></label>
             </div>
           </fieldset>
           <div class="group hidden" id="tokenRow">
@@ -336,11 +361,17 @@
         <h2>Результат</h2>
         <button class="ghost" id="copyBtn" type="button">Скопіювати</button>
         <button class="ghost" id="downloadBtn" type="button">Завантажити</button>
-        <span class="hint hidden" id="confLegend">
-          <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> Натисни на слово, щоб побачити впевненість
-        </span>
+        <p class="hint stale-note">Налаштування змінено, розпізнай ще раз</p>
       </div>
-      <div id="resultRendered" class="transcript hidden"></div>
+      <div class="hidden" id="wordTools">
+        <div class="word-bar">
+          <span class="conf-mid" id="midCount"></span>
+          <span class="conf-low" id="lowCount"></span>
+          <button type="button" class="ghost" id="nextWordBtn">Наступне слово</button>
+        </div>
+        <p class="hint" id="wordInfo" aria-live="polite"></p>
+      </div>
+      <div id="resultRendered" class="transcript hidden" aria-label="Розпізнаний текст, можна редагувати"></div>
       <textarea id="resultText" aria-label="Розпізнаний текст, можна редагувати"></textarea>
     </div>
   </section>
@@ -361,7 +392,11 @@
   const settingsForm = document.getElementById('settingsForm');
   const settings = document.getElementById('settings');
   const { engine: engineSel, speedProfile, mode: modeSel, output: outputSel } = settingsForm.elements;
-  const confLegend = document.getElementById('confLegend');
+  const wordTools = document.getElementById('wordTools');
+  const wordInfo = document.getElementById('wordInfo');
+  const midCount = document.getElementById('midCount');
+  const lowCount = document.getElementById('lowCount');
+  const nextWordBtn = document.getElementById('nextWordBtn');
   const statusEl = document.getElementById('status');
   const resultPanel = document.getElementById('resultPanel');
   const resultText = document.getElementById('resultText');
@@ -402,15 +437,8 @@
   function updateEngineUi() {
     const isDeepseek = engineSel.value === 'deepseek';
     speedField.classList.toggle('hidden', !isDeepseek);
-    // Word confidence and PDF come from Tesseract only.
+    // Word confidence comes from Tesseract only.
     outputField.classList.toggle('hidden', isDeepseek);
-    updateRunLabel();
-  }
-
-  // The button names what it will produce.
-  function updateRunLabel() {
-    const pdf = engineSel.value !== 'deepseek' && outputSel.value === 'pdf';
-    runBtn.textContent = pdf ? 'Створити PDF' : 'Розпізнати';
   }
 
   // Confidence (0-100) at or above which a word counts as sure / doubtful.
@@ -440,14 +468,67 @@
         if (j) resultRendered.append(' ');
         const span = document.createElement('span');
         span.textContent = w.text;
-        span.title = '«' + w.text + '»: впевненість ' + Math.round(w.conf) + '%';
-        if (w.conf < CONF_DOUBT) span.className = 'conf-low';
-        else if (w.conf < CONF_SURE) span.className = 'conf-mid';
+        if (w.conf < CONF_SURE) {
+          span.className = w.conf < CONF_DOUBT ? 'conf-low' : 'conf-mid';
+          span.dataset.orig = w.text;
+          span.dataset.conf = Math.round(w.conf);
+        }
         resultRendered.append(span);
       });
     });
     return lines.map(line => line.map(w => w.text).join(' ')).join('\n');
   }
+
+  // --- Proofreading the word check view: edit in place, jump between flags ---
+  const isWordView = () => !resultRendered.classList.contains('hidden');
+  // The text as the user sees it, edits included.
+  const resultValue = () => isWordView() ? resultRendered.innerText : resultText.value;
+  const flaggedWords = () => [...resultRendered.querySelectorAll('.conf-mid, .conf-low')];
+
+  function updateWordCounts() {
+    const mid = resultRendered.querySelectorAll('.conf-mid').length;
+    const low = resultRendered.querySelectorAll('.conf-low').length;
+    midCount.textContent = 'Сумнівні: ' + mid;
+    lowCount.textContent = 'Ймовірні помилки: ' + low;
+    midCount.classList.toggle('hidden', !mid);
+    lowCount.classList.toggle('hidden', !low);
+    nextWordBtn.classList.toggle('hidden', !mid && !low);
+    if (!mid && !low) wordInfo.textContent = 'Підсвічених слів не лишилося.';
+  }
+
+  function showWord(span) {
+    resultRendered.querySelector('.current')?.classList.remove('current');
+    span.classList.add('current');
+    wordInfo.textContent = '«' + span.dataset.orig + '»: впевненість ' + span.dataset.conf + '%. Виправ слово прямо в тексті.';
+  }
+
+  resultRendered.addEventListener('click', (e) => {
+    const span = e.target.closest('[data-conf]');
+    if (span) showWord(span);
+  });
+
+  // An edited word counts as checked: its mark goes away.
+  resultRendered.addEventListener('input', () => {
+    for (const span of resultRendered.querySelectorAll('[data-conf]')) {
+      if (span.textContent !== span.dataset.orig) span.classList.remove('conf-mid', 'conf-low', 'current');
+    }
+    updateWordCounts();
+  });
+
+  nextWordBtn.addEventListener('click', () => {
+    const words = flaggedWords();
+    if (!words.length) return;
+    const current = resultRendered.querySelector('.current');
+    const span = words[(words.indexOf(current) + 1) % words.length];
+    showWord(span);
+    span.scrollIntoView({ block: 'nearest', behavior: scrollBehavior() });
+    // Select the word, so typing replaces it.
+    resultRendered.focus();
+    const range = document.createRange();
+    range.selectNodeContents(span);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
 
   function download(blob, name) {
     const a = document.createElement('a');
@@ -465,6 +546,8 @@
       try { localStorage.setItem('ocr_engine', engineSel.value); } catch {}
     }
     updateEngineUi();
+    // The result on screen came from the old settings.
+    if (!resultPanel.classList.contains('hidden')) resultPanel.classList.add('stale');
   });
   updateEngineUi();
 
@@ -633,14 +716,12 @@
       }
       const seconds = fmtSeconds((Date.now() - startedAt) / 1000);
       resultRendered.classList.toggle('words', output === 'tsv');
-      confLegend.classList.toggle('hidden', output !== 'tsv');
-      if (output === 'pdf') {
-        download(await resp.blob(), selectedFile.name.replace(/\.[^.]*$/, '') + '.pdf');
-        setStatus('PDF створено за ' + seconds + ' с', 'ok');
-        return;
-      }
+      wordTools.classList.toggle('hidden', output !== 'tsv');
+      resultRendered.contentEditable = output === 'tsv' ? 'true' : 'false';
       if (output === 'tsv') {
         resultText.value = renderWords(await resp.text());
+        wordInfo.textContent = 'Натисни на підсвічене слово, щоб побачити впевненість. Текст можна виправляти прямо тут.';
+        updateWordCounts();
         resultPanel.classList.remove('hidden');
         resultRendered.classList.remove('hidden');
         resultText.classList.add('hidden');
@@ -677,6 +758,7 @@
 
   const scrollBehavior = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
   function showResult() {
+    resultPanel.classList.remove('stale');
     resultPanel.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
   }
 
@@ -685,13 +767,8 @@
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !runBtn.disabled) runBtn.click();
   });
 
-  // Tooltips don't show on touch screens, so a tap shows the confidence too.
-  resultRendered.addEventListener('click', (e) => {
-    if (resultRendered.classList.contains('words') && e.target.title) setStatus(e.target.title);
-  });
-
   downloadBtn.addEventListener('click', () => {
-    download(new Blob([resultText.value], { type: 'text/plain;charset=utf-8' }),
+    download(new Blob([resultValue()], { type: 'text/plain;charset=utf-8' }),
       selectedFile.name.replace(/\.[^.]*$/, '') + '.txt');
   });
 
@@ -705,14 +782,16 @@
   copyBtn.addEventListener('click', async () => {
     let ok = true;
     try {
-      await navigator.clipboard.writeText(resultText.value);
+      await navigator.clipboard.writeText(resultValue());
     } catch {
       // Over plain http (the Pi's address) the Clipboard API doesn't exist.
       // The result textarea may be hidden (word check view), so copy from a
       // temporary one instead.
       const t = document.createElement('textarea');
-      t.value = resultText.value;
-      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      t.value = resultValue();
+      // 16px and readonly: iOS would otherwise zoom in and flash the keyboard.
+      t.readOnly = true;
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0;font-size:16px';
       document.body.append(t);
       t.select();
       ok = document.execCommand('copy');
