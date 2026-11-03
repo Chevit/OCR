@@ -38,9 +38,11 @@ curl -X POST http://localhost:8000/ocr \
   -F "mode=text"
 ```
 
-`POST /ocr` accepts `mode=text|table`, `output=json|text|tsv|words`, and
-`max_megapixels` (overrides `TESSERACT_MAX_MEGAPIXELS`). The JSON response is
-`text`, `mode`, `model` (for example `tesseract (ukr+eng)`), `seconds` and
+`POST /ocr` accepts `mode=text|table`, `output=json|text|tsv|words`,
+`model=fast|best` (Tesseract's fast models, or the slower, usually more accurate
+tessdata_best ones from `TESSDATA_BEST_DIR`), and `max_megapixels` (overrides
+`TESSERACT_MAX_MEGAPIXELS`). The JSON response is `text`, `mode`, `model` (for
+example `tesseract fast (ukr+eng)`), `seconds` and
 `filename`. `output=tsv` returns Tesseract's raw TSV, and `output=words` returns
 JSON with `tsv`, `image` (the prepared page as a JPEG data URL; TSV positions
 are in its pixels) and `seconds`.
@@ -71,6 +73,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_LANGS` | `ukr+eng` | languages passed to `-l` |
 | `TESSERACT_MAX_MEGAPIXELS` | `8` | largest image size sent to Tesseract |
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
+| `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
 ## Tests
 

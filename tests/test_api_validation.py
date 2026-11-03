@@ -32,6 +32,32 @@ class OcrValidationTests(unittest.TestCase):
         image.load.assert_not_called()
 
 
+class ModelChoiceTests(unittest.TestCase):
+    def test_best_models_missing_is_a_clear_error(self):
+        with patch("app.main.TESSDATA_BEST_DIR", "/nonexistent/tessdata_best"):
+            response = TestClient(app).post(
+                "/ocr",
+                data={"model": "best"},
+                files={"file": ("sample.png", b"not examined", "image/png")},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Точні моделі", response.json()["detail"])
+
+    def test_best_points_tesseract_at_the_best_models(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from app.main import run_tesseract
+
+        proc = Mock(returncode=0)
+        proc.communicate = AsyncMock(return_value=(b"text", b""))
+        for model, expected in (("fast", False), ("best", True)):
+            with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as spawn:
+                asyncio.run(run_tesseract(b"png", "text", model=model))
+            self.assertEqual("--tessdata-dir" in spawn.call_args.args, expected)
+
+
 class HealthTests(unittest.TestCase):
     def test_returns_503_when_tesseract_is_unusable(self):
         from unittest.mock import AsyncMock

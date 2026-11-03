@@ -11,6 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ukr \
     && rm -rf /var/lib/apt/lists/*
 
+# Slower, usually more accurate models; the UI lets the user pick them.
+ADD --chmod=644 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.1.0/ukr.traineddata \
+    https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.1.0/eng.traineddata \
+    /usr/share/tessdata_best/
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
