@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GLM-OCR</title>
+<title>OCR</title>
 <link rel="stylesheet" href="/static/vendor/cropper.min.css">
 <style>
   :root {
@@ -179,7 +179,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>GLM-OCR</h1>
+  <h1>OCR</h1>
   <div class="sub">Завантаж зображення — отримай розпізнаний текст</div>
 
   <div class="panel">
@@ -292,14 +292,11 @@
   }
 
   function renderMarkdownPreview() {
-    if (!window.marked || !window.DOMPurify) {
-      // CDN unreachable (offline homelab, blocked network) — fall back
-      // to raw text so the feature degrades instead of breaking.
-      showingRendered = false;
-      return;
-    }
-    const html = DOMPurify.sanitize(marked.parse(resultText.value));
-    resultRendered.innerHTML = html;
+    // Returns false if the vendored libraries failed to load, so the caller
+    // falls back to raw text instead of showing an empty panel.
+    if (!window.marked || !window.DOMPurify) return false;
+    resultRendered.innerHTML = DOMPurify.sanitize(marked.parse(resultText.value));
+    return true;
   }
 
   function setResultView(rendered) {
@@ -309,7 +306,7 @@
     viewToggleBtn.textContent = showingRendered ? 'Сирий Markdown' : 'Показати як документ';
   }
 
-  viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered));
+  viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered && renderMarkdownPreview()));
   speedProfile.addEventListener('change', updateProfileHint);
   updateProfileHint();
 
@@ -320,20 +317,20 @@
     profileHint.classList.toggle('hidden', !isDeepseek);
   }
   try {
-    const savedEngine = localStorage.getItem('glm_ocr_engine');
+    const savedEngine = localStorage.getItem('ocr_engine');
     if ([...engineSel.options].some(o => o.value === savedEngine)) engineSel.value = savedEngine;
   } catch {}
   engineSel.addEventListener('change', () => {
-    try { localStorage.setItem('glm_ocr_engine', engineSel.value); } catch {}
+    try { localStorage.setItem('ocr_engine', engineSel.value); } catch {}
     updateEngineUi();
   });
   updateEngineUi();
 
   try {
-    tokenInput.value = localStorage.getItem('glm_ocr_token') || '';
+    tokenInput.value = localStorage.getItem('ocr_token') || '';
   } catch {}
   tokenInput.addEventListener('change', () => {
-    try { localStorage.setItem('glm_ocr_token', tokenInput.value); } catch {}
+    try { localStorage.setItem('ocr_token', tokenInput.value); } catch {}
   });
 
   function setStatus(text, kind) {
@@ -485,8 +482,7 @@
       isDocumentMode = data.mode === 'document' && data.engine !== 'tesseract';
       viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
       if (isDocumentMode) {
-        renderMarkdownPreview();
-        setResultView(true);
+        setResultView(renderMarkdownPreview());
       } else {
         setResultView(false);
       }

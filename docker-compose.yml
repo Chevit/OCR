@@ -1,7 +1,7 @@
 services:
   ollama:
     image: ollama/ollama:latest
-    container_name: ocr
+    container_name: ollama
     restart: unless-stopped
     volumes:
       - ollama-data:/root/.ollama

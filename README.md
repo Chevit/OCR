@@ -60,13 +60,16 @@ your documents, 4 is worth trying in `TESSERACT_PSM` in `app/main.py`.
 
 ## Limits and performance
 
-- Uploads are limited to 20 MB and source images to 20 MP to protect Pi RAM.
+- Uploads are limited to 20 MB (`MAX_UPLOAD_BYTES`) and source images to 20 MP
+  (`MAX_SOURCE_MEGAPIXELS`) to protect Pi RAM.
 - The server reduces images to 1 MP by default.
 - `GEN_TIME_LIMIT=600` bounds a recognition run; `REQUEST_TIMEOUT=900` allows
   a slow first token while DeepSeek-OCR is loading.
-- For the fastest DeepSeek result, use the **Швидко** profile or crop the
+- For the fastest DeepSeek result, use the **Швидко** speed profile or crop the
   image around the text.
-- Tesseract straightens rotated phone photos, converts to grayscale, raises
+- Tesseract turns sideways or upside-down photos upright (from EXIF, or with
+  Tesseract's orientation check when EXIF is missing), levels text tilted up to
+  10°, converts to grayscale, raises
   contrast, and keeps up to 8 MP (about a 300 DPI A4 scan) because it needs
   detail. Images under 4 MP (for example photos compressed by a messenger) are
   enlarged up to 2x, which roughly doubles recognition quality for them.

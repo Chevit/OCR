@@ -51,7 +51,7 @@ MODE_PROMPTS = {
     "document": "<|grounding|>Convert the document to markdown.",
 }
 
-app = FastAPI(title="GLM-OCR service", version="1.0.0")
+app = FastAPI(title="OCR service", version="1.0.0")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 
@@ -93,7 +93,7 @@ def open_image(raw: bytes) -> Image.Image:
 
 
 def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
-    """Resize the image so it stays near the resolution GLM-OCR was trained on.
+    """Resize the image so it stays near the resolution the OCR model was trained on.
     Feeding it much larger images is the #1 cause of runaway token repetition."""
     img = open_image(raw)
     width, height = img.size
@@ -107,9 +107,49 @@ def downscale_image(raw: bytes, max_megapixels: float) -> bytes:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)
 
+    return to_png(img)
+
+
+def to_png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def find_skew_angle(img: Image.Image) -> float:
+    """Find the angle (degrees, counter-clockwise) that levels slightly tilted
+    text, e.g. a page photographed at an angle. When text rows are level, the
+    ink per pixel row alternates sharply between lines and gaps; we rotate a
+    small copy and keep the angle where that row profile is sharpest."""
+    thumb = img.convert("L")
+    thumb.thumbnail((600, 600))
+    ink = thumb.point(lambda p: 255 if p < 128 else 0)  # text white on black
+
+    def score(angle: float) -> tuple[float, float]:
+        rotated = ink.rotate(angle, resample=Image.BILINEAR, fillcolor=0)
+        rows = rotated.resize((1, rotated.height), Image.BOX).tobytes()
+        mean = sum(rows) / len(rows)
+        # Ties (e.g. a blank page) go to the smallest rotation.
+        return sum((v - mean) ** 2 for v in rows), -abs(angle)
+
+    # ponytail: brute-force search (~30 small rotations), fine for ±10° tilt;
+    # widen the range if steeper photos show up.
+    best = max(range(-10, 11), key=score)
+    return max((best + step / 10 for step in range(-5, 6)), key=score)
+
+
+def straighten(img: Image.Image) -> Image.Image:
+    angle = find_skew_angle(img)
+    if abs(angle) < 0.3:  # not worth resampling the image
+        return img
+    return img.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
+
+
+def turn_upright(image_png: bytes, clockwise: int) -> bytes:
+    """Turn a prepared (grayscale) page by the OSD-detected rotation, then
+    level any small tilt that was hidden while the page lay sideways."""
+    img = Image.open(io.BytesIO(image_png)).rotate(-clockwise, expand=True)
+    return to_png(straighten(img))
 
 
 def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
@@ -140,9 +180,46 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)
 
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    return to_png(straighten(img))
+
+
+async def detect_rotation(image_png: bytes) -> int:
+    """Ask Tesseract's orientation check (OSD) whether the page is sideways
+    or upside down, which EXIF can't tell for photos sent via messengers
+    (they strip it). Returns degrees to turn clockwise: 0, 90, 180 or 270.
+    OSD fails on pages with little text, so any failure just means 0."""
+    proc = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            TESSERACT_CMD, "stdin", "stdout", "--psm", "0",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(image_png), 30)
+    except (OSError, TimeoutError):
+        return 0
+    finally:
+        if proc is not None and proc.returncode is None:  # timed out or Stop pressed
+            proc.kill()
+            await proc.wait()
+
+    text = out.decode("utf-8", errors="replace")
+    rotate = re.search(r"Rotate: (\d+)", text)
+    confidence = re.search(r"Orientation confidence: ([\d.]+)", text)
+    # Low confidence guesses flip upright pages, so only trust clear answers.
+    if proc.returncode != 0 or not rotate or not confidence or float(confidence.group(1)) < 2:
+        return 0
+    return int(rotate.group(1)) % 360
+
+
+async def tesseract_ocr(raw: bytes, mode: str, max_megapixels: float) -> str:
+    # Image work runs in a thread so a big photo doesn't stall other requests.
+    image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
+    rotation = await detect_rotation(image_png)
+    if rotation:
+        image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
+    return clean_tesseract_text(await run_tesseract(image_png, mode))
 
 
 async def run_tesseract(image_png: bytes, mode: str) -> str:
@@ -173,6 +250,10 @@ async def run_tesseract(image_png: bytes, mode: str) -> str:
             status_code=504,
             detail=f"Tesseract не завершив розпізнавання за {TESSERACT_TIMEOUT:.0f} с",
         )
+    except asyncio.CancelledError:  # the browser pressed Stop
+        proc.kill()
+        await proc.wait()
+        raise
 
     if proc.returncode != 0:
         details = err.decode("utf-8", errors="replace").strip()[:500]
@@ -238,7 +319,7 @@ def _similar(a: str, b: str, threshold: float = 0.88) -> bool:
 
 
 def collapse_repetition(text: str, min_streak: int = 4) -> tuple[str, bool]:
-    """Some images push GLM-OCR into repeating the same sentence(s) forever —
+    """Some images push the OCR model into repeating the same sentence(s) forever —
     this happens even with sampling penalties tuned up, and even via raw
     `ollama run` with no options set at all. As a last line of defense,
     detect a block of 1-4 sentences that repeats several times in a row and
@@ -278,9 +359,22 @@ def collapse_repetition(text: str, min_streak: int = 4) -> tuple[str, bool]:
     return text, False
 
 
-async def run_ocr(
-    image_bytes: bytes, mode: str, request: Request, max_predict: int
-) -> tuple[str, str]:
+async def cancel_on_disconnect(request: Request, coro):
+    """Run an OCR coroutine, cancelling it once the browser disconnects (the
+    UI's Stop button). Polling here, not inside the OCR loop, also covers the
+    minutes Ollama can spend loading the model before the first token."""
+    task = asyncio.ensure_future(coro)
+    while True:
+        done, _ = await asyncio.wait({task}, timeout=1)
+        if done:
+            return task.result()
+        if await request.is_disconnected():
+            task.cancel()  # closes the Ollama stream / kills tesseract
+            await asyncio.gather(task, return_exceptions=True)
+            raise HTTPException(status_code=499, detail="Запит скасовано клієнтом")
+
+
+async def run_ocr(image_bytes: bytes, mode: str, max_predict: int) -> tuple[str, str]:
     """Streams the response from Ollama instead of waiting for the whole
     thing at once. This lets us enforce a wall-clock time limit on
     generation (GEN_TIME_LIMIT) rather than only a token-count limit
@@ -329,13 +423,6 @@ async def run_ocr(
                     )
 
                 async for line in resp.aiter_lines():
-                    # The web UI can cancel a long recognition. Once the
-                    # browser disconnects, close this stream too, which tells
-                    # Ollama to stop generating instead of consuming CPU for
-                    # a response that can no longer be delivered.
-                    if await request.is_disconnected():
-                        stop_reason = "client_cancelled"
-                        break
                     if not line.strip():
                         continue
                     obj = json.loads(line)
@@ -445,12 +532,6 @@ async def ocr(
 ):
     check_auth(authorization)
 
-    if request.headers.get("content-length") and int(request.headers["content-length"]) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Файл має бути не більше {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
-        )
-
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Порожній файл")
@@ -471,9 +552,11 @@ async def ocr(
 
     if engine == "tesseract":
         # max_predict is a DeepSeek setting and is ignored here.
-        image_png = prepare_for_tesseract(raw, max_megapixels or TESSERACT_MAX_MEGAPIXELS)
         started = time.time()
-        text = clean_tesseract_text(await run_tesseract(image_png, mode))
+        text = await cancel_on_disconnect(
+            request,
+            tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS),
+        )
         return _ocr_response(
             text=text,
             mode=mode,
@@ -487,11 +570,11 @@ async def ocr(
         )
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
-    resized = downscale_image(raw, limit)
+    resized = await asyncio.to_thread(downscale_image, raw, limit)
 
     started = time.time()
-    text, stop_reason = await run_ocr(
-        resized, mode, request, max_predict or NUM_PREDICT
+    text, stop_reason = await cancel_on_disconnect(
+        request, run_ocr(resized, mode, max_predict or NUM_PREDICT)
     )
     elapsed = round(time.time() - started, 2)
 
@@ -522,7 +605,7 @@ async def ocr(
     elif stop_reason == "length":
         warning = (
             "Текст обрізано: модель досягла ліміту токенів. Для довгого документа "
-            "обери профіль «Точно» або обріж зображення до потрібної частини."
+            "обери профіль «Точно» (до 2048 токенів) або обріж зображення до потрібної частини."
         )
     else:
         warning = None

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
-from app.main import app, clean_tesseract_text
+from app.main import app, clean_tesseract_text, detect_rotation, find_skew_angle
 
 
 def png_bytes(size=(200, 100), mode="RGB", color="white"):
@@ -31,11 +31,13 @@ class TesseractEngineTests(unittest.TestCase):
         self.client = TestClient(app)
 
     def post(self, **data):
-        return self.client.post(
-            "/ocr",
-            data={"engine": "tesseract", **data},
-            files={"file": ("sample.png", png_bytes(), "image/png")},
-        )
+        # The orientation check is its own tesseract run; tested separately.
+        with patch("app.main.detect_rotation", AsyncMock(return_value=0)):
+            return self.client.post(
+                "/ocr",
+                data={"engine": "tesseract", **data},
+                files={"file": ("sample.png", png_bytes(), "image/png")},
+            )
 
     def test_rejects_unknown_engine(self):
         response = self.post(engine="glm")
@@ -85,6 +87,31 @@ class TesseractEngineTests(unittest.TestCase):
             response = self.post()
         self.assertEqual(response.status_code, 502)
         self.assertIn("Failed loading language 'ukr'", response.json()["detail"])
+
+    def test_finds_tilt_of_rotated_text_rows(self):
+        page = Image.new("L", (800, 600), 255)
+        draw = ImageDraw.Draw(page)
+        for y in range(60, 560, 40):  # stripes standing in for lines of text
+            draw.rectangle((80, y, 720, y + 12), fill=0)
+        tilted = page.rotate(-4, resample=Image.BICUBIC, fillcolor=255)
+
+        self.assertAlmostEqual(find_skew_angle(tilted), 4, delta=0.3)
+        self.assertEqual(find_skew_angle(page), 0)
+        self.assertEqual(find_skew_angle(Image.new("L", (400, 300), 255)), 0)
+
+    def test_orientation_check_trusts_only_confident_answers(self):
+        def osd(stdout, returncode=0):
+            proc = fake_process(stdout=stdout, returncode=returncode)
+            with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as exec_:
+                result = asyncio.run(detect_rotation(b"png"))
+            self.assertIn("--psm", exec_.call_args.args)
+            return result
+
+        self.assertEqual(osd(b"Rotate: 90\nOrientation confidence: 6.3\n"), 90)
+        self.assertEqual(osd(b"Rotate: 180\nOrientation confidence: 0.4\n"), 0)
+        self.assertEqual(osd(b"Too few characters. Skipping this page", returncode=1), 0)
+        with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(side_effect=FileNotFoundError)):
+            self.assertEqual(asyncio.run(detect_rotation(b"png")), 0)
 
     def test_clean_text_keeps_at_most_two_blank_lines(self):
         self.assertEqual(clean_tesseract_text("a \n\n\nb\n\n\n\n\nc\f"), "a\n\n\nb\n\n\nc")

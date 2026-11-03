@@ -37,3 +37,27 @@ class OcrValidationTests(unittest.TestCase):
                 downscale_image(b"header only", 1)
 
         image.load.assert_not_called()
+
+
+class CancelOnDisconnectTests(unittest.TestCase):
+    def test_cancels_work_when_browser_disconnects(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from app.main import cancel_on_disconnect
+
+        cancelled = []
+
+        async def never_finishes():
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+        request = Mock(is_disconnected=AsyncMock(return_value=True))
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(cancel_on_disconnect(request, never_finishes()))
+
+        self.assertEqual(ctx.exception.status_code, 499)
+        self.assertEqual(cancelled, [True])

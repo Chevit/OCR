@@ -1,1 +1,1 @@
-"""GLM-OCR application package."""
+"""OCR service application package."""
