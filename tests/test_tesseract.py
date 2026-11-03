@@ -63,6 +63,29 @@ class TesseractEngineTests(unittest.TestCase):
             self.assertEqual(body["model"], "tesseract (ukr+eng)")
             self.assertFalse(body["truncated"])
 
+    def test_tsv_and_pdf_outputs_return_raw_tesseract_files(self):
+        for output, body, media_type in (
+            ("tsv", b"level\tpage_num\n5\t1\n", "text/tab-separated-values"),
+            ("pdf", b"%PDF-1.5 binary", "application/pdf"),
+        ):
+            proc = fake_process(stdout=body)
+            with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as exec_:
+                response = self.post(output=output)
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(exec_.call_args.args[-1], output)
+            self.assertEqual(response.content, body)
+            self.assertTrue(response.headers["content-type"].startswith(media_type))
+        self.assertIn("sample.pdf", response.headers["content-disposition"])
+
+    def test_tsv_and_pdf_are_rejected_for_deepseek(self):
+        response = self.client.post(
+            "/ocr",
+            data={"engine": "deepseek", "output": "pdf"},
+            files={"file": ("sample.png", png_bytes(), "image/png")},
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_timeout_kills_process_and_returns_504(self):
         async def hang(_):
             await asyncio.sleep(10)

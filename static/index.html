@@ -163,6 +163,11 @@
   }
   .markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
 
+  /* Tesseract word confidence: sure words stay unmarked. */
+  .markdown-body.words { white-space: pre-wrap; }
+  .conf-mid { background: rgba(255, 196, 0, .4); border-radius: 3px; }
+  .conf-low { background: rgba(230, 50, 50, .4); border-radius: 3px; }
+
   .hidden { display: none !important; }
   .spinner {
     width: 14px; height: 14px;
@@ -213,6 +218,11 @@
         <option value="figure">Фігура/схема</option>
         <option value="document">Документ (Markdown)</option>
       </select>
+      <select id="output" aria-label="Результат" title="Результат">
+        <option value="json">Текст</option>
+        <option value="tsv">Текст з упевненістю слів</option>
+        <option value="pdf">PDF з текстовим шаром</option>
+      </select>
       <button class="primary" id="runBtn" disabled>Розпізнати</button>
       <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
       <span class="status" id="status"></span>
@@ -226,6 +236,9 @@
   <div class="panel hidden" id="resultPanel">
     <div class="row" style="margin-top:0">
       <strong>Результат</strong>
+      <span class="profile-hint hidden" id="confLegend">
+        <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> — наведи на слово, щоб побачити впевненість
+      </span>
       <button class="ghost hidden" id="viewToggleBtn" style="margin-left:auto">Сирий Markdown</button>
       <button class="ghost" id="copyBtn" style="margin-left:0">Скопіювати</button>
     </div>
@@ -251,6 +264,8 @@
   const speedProfile = document.getElementById('speedProfile');
   const profileHint = document.getElementById('profileHint');
   const modeSel = document.getElementById('mode');
+  const outputSel = document.getElementById('output');
+  const confLegend = document.getElementById('confLegend');
   const statusEl = document.getElementById('status');
   const resultPanel = document.getElementById('resultPanel');
   const resultText = document.getElementById('resultText');
@@ -281,6 +296,7 @@
   function setBusy(busy) {
     runBtn.disabled = busy || !selectedFile;
     modeSel.disabled = busy;
+    outputSel.disabled = busy;
     engineSel.disabled = busy;
     speedProfile.disabled = busy;
     tokenInput.disabled = busy;
@@ -315,6 +331,52 @@
     const isDeepseek = engineSel.value === 'deepseek';
     speedProfile.classList.toggle('hidden', !isDeepseek);
     profileHint.classList.toggle('hidden', !isDeepseek);
+    // Word confidence and PDF come from Tesseract only.
+    outputSel.classList.toggle('hidden', isDeepseek);
+  }
+
+  // Confidence (0-100) at or above which a word counts as sure / doubtful.
+  const CONF_SURE = 85, CONF_DOUBT = 60;
+
+  // Tesseract TSV columns: level page block par line word left top width
+  // height conf text. Level 5 rows are words; a new paragraph gets a blank line.
+  function renderWords(tsv) {
+    const lines = [];
+    let lineKey = null, parKey = null, words = null;
+    for (const row of tsv.split('\n').slice(1)) {
+      const c = row.split('\t');
+      if (c[0] !== '5' || !c[11] || !c[11].trim()) continue;
+      const par = c[2] + '.' + c[3], line = par + '.' + c[4];
+      if (line !== lineKey) {
+        if (parKey !== null && par !== parKey) lines.push([]);
+        lines.push(words = []);
+        lineKey = line;
+        parKey = par;
+      }
+      words.push({ text: c[11], conf: Number(c[10]) });
+    }
+    resultRendered.replaceChildren();
+    lines.forEach((line, i) => {
+      if (i) resultRendered.append('\n');
+      line.forEach((w, j) => {
+        if (j) resultRendered.append(' ');
+        const span = document.createElement('span');
+        span.textContent = w.text;
+        span.title = 'Впевненість: ' + Math.round(w.conf) + '%';
+        if (w.conf < CONF_DOUBT) span.className = 'conf-low';
+        else if (w.conf < CONF_SURE) span.className = 'conf-mid';
+        resultRendered.append(span);
+      });
+    });
+    return lines.map(line => line.map(w => w.text).join(' ')).join('\n');
+  }
+
+  function download(blob, name) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   try {
     const savedEngine = localStorage.getItem('ocr_engine');
@@ -452,7 +514,8 @@
 
     const form = new FormData();
     form.append('mode', modeSel.value);
-    form.append('output', 'json');
+    const output = isDeepseek ? 'json' : outputSel.value;
+    form.append('output', output);
     form.append('engine', engineSel.value);
     if (isDeepseek) {
       const profile = selectedProfile();
@@ -470,12 +533,31 @@
       const resp = await fetch('/ocr', {
         method: 'POST', body: form, headers, signal: controller.signal,
       });
-      const data = await resp.json().catch(() => ({}));
       if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
         throw new Error(typeof data.detail === 'string'
           ? data.detail
           : 'сервер повернув помилку (HTTP ' + resp.status + ')');
       }
+      const seconds = Math.round((Date.now() - startedAt) / 100) / 10;
+      resultRendered.classList.toggle('words', output === 'tsv');
+      confLegend.classList.toggle('hidden', output !== 'tsv');
+      if (output === 'pdf') {
+        download(await resp.blob(), selectedFile.name.replace(/\.[^.]*$/, '') + '.pdf');
+        setStatus('PDF завантажено за ' + seconds + ' с', 'ok');
+        return;
+      }
+      if (output === 'tsv') {
+        resultText.value = renderWords(await resp.text());
+        resultPanel.classList.remove('hidden');
+        isDocumentMode = false;
+        viewToggleBtn.classList.add('hidden');
+        resultRendered.classList.remove('hidden');
+        resultText.classList.add('hidden');
+        setStatus('Готово за ' + seconds + ' с', 'ok');
+        return;
+      }
+      const data = await resp.json();
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
       // Tesseract returns plain text, so there is no Markdown to render.

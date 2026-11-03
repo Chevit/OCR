@@ -6,11 +6,12 @@ import json
 import os
 import re
 import time
+from urllib.parse import quote
 from typing import Literal, Optional
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 
@@ -213,16 +214,20 @@ async def detect_rotation(image_png: bytes) -> int:
     return int(rotate.group(1)) % 360
 
 
-async def tesseract_ocr(raw: bytes, mode: str, max_megapixels: float) -> str:
+async def tesseract_ocr(
+    raw: bytes, mode: str, max_megapixels: float, renderer: Optional[str] = None
+) -> bytes:
+    """Returns Tesseract's raw output: plain text by default, or the file of
+    the given renderer ("tsv" = words with confidence, "pdf" = searchable PDF)."""
     # Image work runs in a thread so a big photo doesn't stall other requests.
     image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
     rotation = await detect_rotation(image_png)
     if rotation:
         image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
-    return clean_tesseract_text(await run_tesseract(image_png, mode))
+    return await run_tesseract(image_png, mode, renderer)
 
 
-async def run_tesseract(image_png: bytes, mode: str) -> str:
+async def run_tesseract(image_png: bytes, mode: str, renderer: Optional[str] = None) -> bytes:
     """Run the tesseract CLI on a PNG passed through stdin (no temp files, so
     patient documents never touch the disk)."""
     try:
@@ -231,6 +236,10 @@ async def run_tesseract(image_png: bytes, mode: str) -> str:
             "-l", TESSERACT_LANGS,
             "--psm", str(TESSERACT_PSM[mode]),
             "-c", "preserve_interword_spaces=1",
+            # The prepared PNG carries no DPI; without one a PDF page comes out
+            # at 70 DPI (a meter wide). 300 matches TESSERACT_MAX_MEGAPIXELS' A4.
+            *(["--dpi", "300"] if renderer == "pdf" else []),
+            *([renderer] if renderer else []),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -261,7 +270,7 @@ async def run_tesseract(image_png: bytes, mode: str) -> str:
             status_code=502,
             detail=f"Tesseract не зміг розпізнати зображення. Деталі: {details}",
         )
-    return out.decode("utf-8", errors="replace")
+    return out
 
 
 def clean_tesseract_text(text: str) -> str:
@@ -524,7 +533,7 @@ async def ocr(
     request: Request,
     file: UploadFile = File(...),
     mode: Literal["text", "table", "figure", "document"] = Form("text"),
-    output: Literal["text", "json"] = Form("json"),
+    output: Literal["text", "json", "tsv", "pdf"] = Form("json"),
     engine: Literal["deepseek", "tesseract"] = Form("deepseek"),
     max_megapixels: Optional[float] = Form(None),
     max_predict: Optional[int] = Form(None),
@@ -552,13 +561,26 @@ async def ocr(
 
     if engine == "tesseract":
         # max_predict is a DeepSeek setting and is ignored here.
+        renderer = output if output in ("tsv", "pdf") else None
         started = time.time()
-        text = await cancel_on_disconnect(
+        out = await cancel_on_disconnect(
             request,
-            tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS),
+            tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer),
         )
+        if output == "pdf":
+            name = os.path.splitext(file.filename or "ocr")[0] + ".pdf"
+            return Response(
+                out,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+            )
+        if output == "tsv":
+            return PlainTextResponse(
+                out.decode("utf-8", errors="replace"),
+                media_type="text/tab-separated-values",
+            )
         return _ocr_response(
-            text=text,
+            text=clean_tesseract_text(out.decode("utf-8", errors="replace")),
             mode=mode,
             engine=engine,
             model=f"tesseract ({TESSERACT_LANGS})",
@@ -568,6 +590,9 @@ async def ocr(
             warning=None,
             output=output,
         )
+
+    if output in ("tsv", "pdf"):
+        raise HTTPException(status_code=400, detail=f"output={output} доступний лише для Tesseract")
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
     resized = await asyncio.to_thread(downscale_image, raw, limit)
@@ -629,7 +654,7 @@ async def api_info():
         "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text, engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text|tsv|pdf (tsv/pdf: Tesseract only), engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
             "GET /health": "checks Ollama (and whether the model is pulled) and Tesseract languages",
         },
     }

@@ -47,7 +47,13 @@ curl -X POST http://localhost:8000/ocr \
   -F "engine=tesseract"
 ```
 
-`POST /ocr` accepts `mode=text|table|figure|document`, `output=json|text`,
+With Tesseract, the result can also be **Текст з упевненістю слів** (doubtful
+words in yellow, likely errors in red; hover a word for its confidence) or
+**PDF з текстовим шаром** (a searchable PDF of the cleaned-up page). In the API
+these are `output=tsv` (Tesseract's raw TSV) and `output=pdf`; both are
+Tesseract-only and return 400 with DeepSeek.
+
+`POST /ocr` accepts `mode=text|table|figure|document`, `output=json|text|tsv|pdf`,
 `engine=deepseek|tesseract` (default `deepseek`), `max_megapixels`, and
 `max_predict`. `max_predict` applies to DeepSeek only. For Tesseract,
 `max_megapixels` overrides `TESSERACT_MAX_MEGAPIXELS`. The JSON response
