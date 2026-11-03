@@ -69,7 +69,7 @@ class TesseractEngineTests(unittest.TestCase):
             response = self.post(output="tsv")
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(exec_.call_args.args[-1], "tsv")
+        self.assertEqual(exec_.call_args.args[-1], "tessedit_create_tsv=1")
         self.assertEqual(response.content, body)
         self.assertTrue(response.headers["content-type"].startswith("text/tab-separated-values"))
 
@@ -79,7 +79,7 @@ class TesseractEngineTests(unittest.TestCase):
             response = self.post(output="words")
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(exec_.call_args.args[-1], "tsv")
+        self.assertEqual(exec_.call_args.args[-1], "tessedit_create_tsv=1")
         body = response.json()
         self.assertEqual(body["tsv"], "level\tpage_num\n5\t1\n")
         prefix = "data:image/jpeg;base64,"

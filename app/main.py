@@ -208,7 +208,9 @@ async def run_tesseract(
             "-l", TESSERACT_LANGS,
             "--psm", str(TESSERACT_PSM[mode]),
             "-c", "preserve_interword_spaces=1",
-            *([renderer] if renderer else []),
+            # A setting, not the "tsv" config file: that file lives in the
+            # default tessdata folder, which --tessdata-dir hides.
+            *(["-c", f"tessedit_create_{renderer}=1"] if renderer else []),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
