@@ -215,15 +215,23 @@ async def detect_rotation(image_png: bytes) -> int:
 
 async def tesseract_ocr(
     raw: bytes, mode: str, max_megapixels: float, renderer: Optional[str] = None
-) -> bytes:
-    """Returns Tesseract's raw output: plain text by default, or the file of
-    the given renderer ("tsv" = words with confidence)."""
+) -> tuple[bytes, bytes]:
+    """Returns Tesseract's raw output (plain text by default, or the file of
+    the given renderer: "tsv" = words with confidence and position) and the
+    prepared PNG it read, which word positions refer to."""
     # Image work runs in a thread so a big photo doesn't stall other requests.
     image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
     rotation = await detect_rotation(image_png)
     if rotation:
         image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
-    return await run_tesseract(image_png, mode, renderer)
+    return await run_tesseract(image_png, mode, renderer), image_png
+
+
+def to_jpeg_data_url(image_png: bytes) -> str:
+    """The prepared page for display; JPEG keeps it a fraction of the PNG."""
+    buf = io.BytesIO()
+    Image.open(io.BytesIO(image_png)).convert("L").save(buf, format="JPEG", quality=85)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 async def run_tesseract(image_png: bytes, mode: str, renderer: Optional[str] = None) -> bytes:
@@ -529,7 +537,7 @@ async def ocr(
     request: Request,
     file: UploadFile = File(...),
     mode: Literal["text", "table", "figure", "document"] = Form("text"),
-    output: Literal["text", "json", "tsv"] = Form("json"),
+    output: Literal["text", "json", "tsv", "words"] = Form("json"),
     engine: Literal["deepseek", "tesseract"] = Form("deepseek"),
     max_megapixels: Optional[float] = Form(None),
     max_predict: Optional[int] = Form(None),
@@ -557,12 +565,20 @@ async def ocr(
 
     if engine == "tesseract":
         # max_predict is a DeepSeek setting and is ignored here.
-        renderer = "tsv" if output == "tsv" else None
+        renderer = "tsv" if output in ("tsv", "words") else None
         started = time.time()
-        out = await cancel_on_disconnect(
+        out, page_png = await cancel_on_disconnect(
             request,
             tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer),
         )
+        if output == "words":
+            # TSV word boxes are in the prepared page's pixels, so the page
+            # comes along: the UI shows it and draws boxes on it as-is.
+            return JSONResponse({
+                "tsv": out.decode("utf-8", errors="replace"),
+                "image": await asyncio.to_thread(to_jpeg_data_url, page_png),
+                "seconds": round(time.time() - started, 2),
+            })
         if output == "tsv":
             return PlainTextResponse(
                 out.decode("utf-8", errors="replace"),
@@ -580,8 +596,8 @@ async def ocr(
             output=output,
         )
 
-    if output == "tsv":
-        raise HTTPException(status_code=400, detail="output=tsv доступний лише для Tesseract")
+    if output in ("tsv", "words"):
+        raise HTTPException(status_code=400, detail=f"output={output} доступний лише для Tesseract")
 
     limit = max_megapixels if max_megapixels else MAX_MEGAPIXELS
     resized = await asyncio.to_thread(downscale_image, raw, limit)
@@ -643,7 +659,7 @@ async def api_info():
         "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text|tsv (tsv: Tesseract only), engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
+            "POST /ocr": "multipart form: file, mode=text|table|figure|document, output=json|text|tsv|words (tsv, words: Tesseract only), engine=deepseek|tesseract, max_megapixels, max_predict (DeepSeek only)",
             "GET /health": "checks Ollama (and whether the model is pulled) and Tesseract languages",
         },
     }

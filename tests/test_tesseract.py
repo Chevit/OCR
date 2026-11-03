@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 import os
 import shutil
@@ -73,6 +74,22 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertEqual(exec_.call_args.args[-1], "tsv")
         self.assertEqual(response.content, body)
         self.assertTrue(response.headers["content-type"].startswith("text/tab-separated-values"))
+
+    def test_words_output_returns_tsv_and_the_page_it_refers_to(self):
+        proc = fake_process(stdout=b"level\tpage_num\n5\t1\n")
+        with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as exec_:
+            response = self.post(output="words")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(exec_.call_args.args[-1], "tsv")
+        body = response.json()
+        self.assertEqual(body["tsv"], "level\tpage_num\n5\t1\n")
+        prefix = "data:image/jpeg;base64,"
+        self.assertTrue(body["image"].startswith(prefix))
+        # Same pixels Tesseract read: the PNG piped to it.
+        sent = Image.open(io.BytesIO(proc.communicate.call_args.args[0]))
+        page = Image.open(io.BytesIO(base64.b64decode(body["image"][len(prefix):])))
+        self.assertEqual(page.size, sent.size)
 
     def test_pdf_output_is_rejected(self):
         response = self.post(output="pdf")

@@ -50,11 +50,17 @@ curl -X POST http://localhost:8000/ocr \
 
 With Tesseract, the result can also be **Текст з перевіркою слів**: doubtful
 words get a dotted underline and likely errors a red highlight. Click a word to
-see its confidence, fix words right in the text, and use **Наступне слово** to
-jump between marked words. In the API this is `output=tsv` (Tesseract's raw
-TSV). It is Tesseract-only and returns 400 with DeepSeek.
+see its confidence and where it is on the page, fix words right in the text,
+and use **Наступне слово** to jump between marked words. While checking, the
+image area shows the page as Tesseract read it (upright, levelled, grayscale),
+so word boxes line up with it exactly.
 
-`POST /ocr` accepts `mode=text|table|figure|document`, `output=json|text|tsv`,
+In the API, `output=tsv` returns Tesseract's raw TSV, and `output=words` returns
+JSON with `tsv`, `image` (that prepared page as a JPEG data URL; TSV positions
+are in its pixels) and `seconds`. Both are Tesseract-only and return 400 with
+DeepSeek.
+
+`POST /ocr` accepts `mode=text|table|figure|document`, `output=json|text|tsv|words`,
 `engine=deepseek|tesseract` (default `deepseek`), `max_megapixels`, and
 `max_predict`. `max_predict` applies to DeepSeek only. For Tesseract,
 `max_megapixels` overrides `TESSERACT_MAX_MEGAPIXELS`. The JSON response
@@ -72,8 +78,9 @@ your documents, 4 is worth trying in `TESSERACT_PSM` in `app/main.py`.
 - The server reduces images to 1 MP by default.
 - `GEN_TIME_LIMIT=600` bounds a recognition run; `REQUEST_TIMEOUT=900` allows
   a slow first token while DeepSeek-OCR is loading.
-- For the fastest DeepSeek result, use the **Швидко** speed profile or crop the
-  image around the text.
+- For the fastest DeepSeek result, set **Деталізація** to **Низька** or crop the
+  image around the text with **Обрізати й повернути** (Enter applies the
+  selection, Esc cancels it).
 - Tesseract turns sideways or upside-down photos upright (from EXIF, or with
   Tesseract's orientation check when EXIF is missing), levels text tilted up to
   10°, converts to grayscale, raises

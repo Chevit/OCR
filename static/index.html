@@ -101,7 +101,7 @@
   .dropzone.drag { background: color-mix(in srgb, var(--lamp) 10%, var(--glass)); }
   #fileInput { display: none; }
 
-  /* Cropper.js sizes its editor to this box, so it needs a fixed height. */
+  /* The selected part, as it will be sent. */
   .crop-box {
     position: relative;
     height: min(72vh, 760px);
@@ -114,10 +114,56 @@
     .tools button { min-height: 44px; }
     #runBtn { flex: 1 1 100%; min-height: 48px; }
   }
-  .crop-box img { display: block; max-width: 100%; }
-  .crop-box .cropper-modal { background: var(--glass); opacity: .6; }
-  .crop-box .cropper-view-box { outline-color: var(--lamp); }
-  .crop-box .cropper-line, .crop-box .cropper-point { background-color: var(--lamp); }
+  .crop-box img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  /* Spotlight on the word being checked, drawn over the page Tesseract read. */
+  .word-box {
+    position: absolute;
+    z-index: 4;
+    pointer-events: none;
+    border: 2px solid var(--lamp);
+    border-radius: 3px;
+    box-shadow: 0 0 0 9999px rgba(11, 15, 19, .35);
+    transition: left .15s, top .15s, width .15s, height .15s;
+  }
+  @media (prefers-reduced-motion: reduce) { .word-box { transition: none; } }
+  .crop-box.drag { outline: 2px dashed var(--lamp); outline-offset: -2px; }
+
+  /* Crop window: large on a laptop, full screen on a phone. */
+  #cropDialog {
+    width: min(1280px, 92vw);
+    height: 90vh;
+    max-width: none;
+    max-height: none;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper);
+    color: var(--ink);
+    box-sizing: border-box;
+  }
+  #cropDialog[open] { display: flex; flex-direction: column; gap: 12px; }
+  #cropDialog::backdrop { background: rgba(0, 0, 0, .6); }
+  #cropDialog h2 { margin: 0; font-size: 16px; }
+  #cropDialog .tools { margin-top: 0; }
+  #cropDialog .tools .end { margin-left: auto; display: flex; gap: 8px; }
+  @media (max-width: 959px) {
+    #cropDialog { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
+  }
+  /* Cropper.js sizes its editor to this box. */
+  .crop-stage { flex: 1 1 auto; min-height: 0; background: var(--glass); border-radius: 10px; overflow: hidden; }
+  .crop-stage img { display: block; max-width: 100%; }
+  .crop-stage .cropper-modal { background: var(--glass); opacity: .6; }
+  .crop-stage .cropper-view-box { outline-color: var(--lamp); }
+  .crop-stage .cropper-line, .crop-stage .cropper-point { background-color: var(--lamp); }
+  .crop-stage .cropper-view-box { outline: 2px solid var(--lamp); }
+  .crop-stage .cropper-point,
+  .crop-stage .cropper-point.point-se { width: 12px; height: 12px; opacity: 1; border-radius: 2px; }
+  .crop-stage .point-n, .crop-stage .point-s { left: 50%; margin-left: -6px; }
+  .crop-stage .point-e, .crop-stage .point-w { top: 50%; margin-top: -6px; }
+  .crop-stage .point-n, .crop-stage .point-ne, .crop-stage .point-nw { top: -6px; }
+  .crop-stage .point-s, .crop-stage .point-se, .crop-stage .point-sw { bottom: -6px; }
+  .crop-stage .point-e, .crop-stage .point-ne, .crop-stage .point-se { right: -6px; }
+  .crop-stage .point-w, .crop-stage .point-nw, .crop-stage .point-sw { left: -6px; }
 
   /* While recognizing, a lamp line sweeps the page like a scanner. */
   .crop-box.scanning::after {
@@ -170,10 +216,10 @@
   }
   .seg small { display: block; font-size: 12px; }
   .seg input:checked + span {
-    background: var(--paper);
+    background: color-mix(in srgb, var(--lamp) 16%, var(--paper));
     color: var(--ink);
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(24, 32, 43, .12), 0 0 0 1px var(--line);
+    box-shadow: 0 0 0 1.5px var(--lamp);
   }
   .seg input:checked + span small { font-weight: 400; color: var(--graphite); }
   .seg input:focus-visible + span { outline: 2px solid var(--lamp); outline-offset: 1px; }
@@ -218,8 +264,11 @@
   }
   button.primary:hover:not(:disabled) { background: var(--lamp-hover); border-color: var(--lamp-hover); }
   button.stop { color: var(--err); border-color: currentColor; font-weight: 600; }
-  .run-bar .hint { margin-left: auto; }
+  .run-bar .hint.mouse { margin-left: auto; }
 
+  .summary { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
+  .summary span { font-weight: 600; }
+  .summary button { margin-left: auto; font-size: 13px; padding: 6px 12px; }
   .status { padding: 0 18px 14px; font-size: 14px; color: var(--graphite); }
   .status:empty { display: none; }
   .status.ok { color: var(--lamp); }
@@ -269,7 +318,6 @@
     resize: vertical;
   }
   textarea:focus-visible { outline: 1px dashed var(--line); outline-offset: 6px; }
-  .transcript { max-height: 70vh; overflow: auto; }
 
   /* Tesseract word confidence: sure words stay unmarked. */
   .transcript.words { white-space: pre-wrap; }
@@ -299,18 +347,36 @@
       <span>PNG, JPG, WEBP</span>
     </button>
     <input type="file" id="fileInput" accept="image/*">
-    <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Обране зображення"></div>
-    <div class="tools hidden" id="cropTools">
-      <button class="ghost icon" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
-      <button class="ghost icon" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button>
-      <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
+    <div class="crop-box hidden" id="cropBox"><img id="shown" alt="Частина зображення для розпізнавання"><div class="word-box hidden" id="wordBox"></div></div>
+    <div class="tools hidden" id="imageTools">
+      <button class="ghost" id="editBtn" type="button">Обрізати й повернути</button>
       <button class="ghost" id="otherFileBtn" type="button">Інше зображення</button>
-      <span class="hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб.</span></span>
+      <span class="hint mouse" id="dropHint">Можна перетягнути сюди інше зображення.</span>
+      <span class="hint hidden" id="pageHint">Сторінка така, якою її прочитав Tesseract: вирівняна й чорно-біла.</span>
     </div>
   </section>
 
+  <dialog id="cropDialog" aria-labelledby="cropTitle">
+    <h2 id="cropTitle">Обрізати й повернути</h2>
+    <div class="crop-stage"><img id="preview" alt="Зображення для обрізання"></div>
+    <div class="tools">
+      <button class="ghost icon" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+      <button class="ghost icon" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg></button>
+      <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
+      <span class="hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб. Enter: готово, Esc: скасувати.</span></span>
+      <div class="end">
+        <button class="ghost" id="cropCancelBtn" type="button">Скасувати</button>
+        <button class="primary" id="cropDoneBtn" type="button" autofocus>Готово</button>
+      </div>
+    </div>
+  </dialog>
+
   <section aria-label="Розпізнавання">
     <div class="sheet">
+      <div class="summary hidden" id="settingsSummary">
+        <span id="summaryText"></span>
+        <button class="ghost" id="changeSettingsBtn" type="button">Змінити</button>
+      </div>
       <form id="settingsForm" onsubmit="return false">
         <fieldset class="settings" id="settings">
           <fieldset class="group">
@@ -352,7 +418,8 @@
       <div class="run-bar">
         <button class="primary" id="runBtn" type="button" disabled>Розпізнати</button>
         <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
-        <span class="hint mouse">Ctrl+Enter / ⌘Enter</span>
+        <span class="hint" id="runHint">Спершу додай зображення</span>
+        <span class="hint mouse hidden" id="shortcutHint">Ctrl+Enter / ⌘Enter</span>
       </div>
     </div>
 
@@ -367,6 +434,7 @@
         <div class="word-bar">
           <span class="conf-mid" id="midCount"></span>
           <span class="conf-low" id="lowCount"></span>
+          <span class="hidden" id="noFlags">Сумнівних слів немає</span>
           <button type="button" class="ghost" id="nextWordBtn">Наступне слово</button>
         </div>
         <p class="hint" id="wordInfo" aria-live="polite"></p>
@@ -383,9 +451,12 @@
   const dropzone = document.getElementById('dropzone');
   const fileInput = document.getElementById('fileInput');
   const preview = document.getElementById('preview');
+  const shown = document.getElementById('shown');
   const cropBox = document.getElementById('cropBox');
-  const cropTools = document.getElementById('cropTools');
-  const cropButtons = cropTools.querySelectorAll('button');
+  const imageTools = document.getElementById('imageTools');
+  const imageButtons = imageTools.querySelectorAll('button');
+  const cropDialog = document.getElementById('cropDialog');
+  const cropDoneBtn = document.getElementById('cropDoneBtn');
   const runBtn = document.getElementById('runBtn');
   const stopBtn = document.getElementById('stopBtn');
   // Radio groups: .value reads and sets the checked option.
@@ -407,11 +478,16 @@
   const speedField = document.getElementById('speedField');
   const outputField = document.getElementById('outputField');
   const downloadBtn = document.getElementById('downloadBtn');
+  const settingsSummary = document.getElementById('settingsSummary');
+  const summaryText = document.getElementById('summaryText');
+  const runHint = document.getElementById('runHint');
   const fmtSeconds = s => Number(s).toLocaleString('uk', { maximumFractionDigits: 1 });
 
-  let selectedFile = null;
+  let selectedFile = null;   // the original image
+  let sendFile = null;       // the selected part, exactly what gets sent
+  let savedCrop = null;      // the last applied frame and rotation
   let activeController = null;
-  let cropper = null;
+  let cropper = null;        // lives only while the crop window is open
   const profiles = {
     fast: { megapixels: 0.5, maxPredict: 512 },
     balanced: { megapixels: 1, maxPredict: 1024 },
@@ -429,8 +505,7 @@
     stopBtn.disabled = !busy;
     stopBtn.classList.toggle('hidden', !busy);
     dropzone.classList.toggle('busy', busy);
-    cropButtons.forEach(b => { b.disabled = busy; });
-    if (cropper) busy ? cropper.disable() : cropper.enable();
+    imageButtons.forEach(b => { b.disabled = busy; });
   }
 
   // The speed profile only tunes DeepSeek (image size, token limit).
@@ -459,7 +534,7 @@
         lineKey = line;
         parKey = par;
       }
-      words.push({ text: c[11], conf: Number(c[10]) });
+      words.push({ text: c[11], conf: Number(c[10]), box: c.slice(6, 10).join(',') });
     }
     resultRendered.replaceChildren();
     lines.forEach((line, i) => {
@@ -468,11 +543,10 @@
         if (j) resultRendered.append(' ');
         const span = document.createElement('span');
         span.textContent = w.text;
-        if (w.conf < CONF_SURE) {
-          span.className = w.conf < CONF_DOUBT ? 'conf-low' : 'conf-mid';
-          span.dataset.orig = w.text;
-          span.dataset.conf = Math.round(w.conf);
-        }
+        span.dataset.orig = w.text;
+        span.dataset.conf = Math.round(w.conf);
+        span.dataset.box = w.box;
+        if (w.conf < CONF_SURE) span.className = w.conf < CONF_DOUBT ? 'conf-low' : 'conf-mid';
         resultRendered.append(span);
       });
     });
@@ -493,14 +567,47 @@
     midCount.classList.toggle('hidden', !mid);
     lowCount.classList.toggle('hidden', !low);
     nextWordBtn.classList.toggle('hidden', !mid && !low);
-    if (!mid && !low) wordInfo.textContent = 'Підсвічених слів не лишилося.';
+    document.getElementById('noFlags').classList.toggle('hidden', mid || low);
   }
 
   function showWord(span) {
     resultRendered.querySelector('.current')?.classList.remove('current');
     span.classList.add('current');
     wordInfo.textContent = '«' + span.dataset.orig + '»: впевненість ' + span.dataset.conf + '%. Виправ слово прямо в тексті.';
+    placeWordBox();
   }
+
+  // --- The page Tesseract read, with the current word outlined on it ---
+  const wordBox = document.getElementById('wordBox');
+  let showingPage = false;
+  function showPage(url) {
+    showingPage = true;
+    shown.src = url;
+    document.getElementById('dropHint').classList.add('hidden');
+    document.getElementById('pageHint').classList.remove('hidden');
+  }
+  // Word boxes are in the page's pixels; the img is scaled with object-fit: contain.
+  function placeWordBox() {
+    const span = resultRendered.querySelector('.current');
+    if (!showingPage || !span || !span.dataset.box || !shown.naturalWidth) {
+      wordBox.classList.add('hidden');
+      return;
+    }
+    const [left, top, width, height] = span.dataset.box.split(',').map(Number);
+    const k = Math.min(shown.clientWidth / shown.naturalWidth, shown.clientHeight / shown.naturalHeight);
+    const x = shown.offsetLeft + (shown.clientWidth - shown.naturalWidth * k) / 2;
+    const y = shown.offsetTop + (shown.clientHeight - shown.naturalHeight * k) / 2;
+    const pad = 3;
+    Object.assign(wordBox.style, {
+      left: x + left * k - pad + 'px',
+      top: y + top * k - pad + 'px',
+      width: width * k + 2 * pad + 'px',
+      height: height * k + 2 * pad + 'px',
+    });
+    wordBox.classList.remove('hidden');
+  }
+  new ResizeObserver(placeWordBox).observe(cropBox);
+  shown.addEventListener('load', placeWordBox);
 
   resultRendered.addEventListener('click', (e) => {
     const span = e.target.closest('[data-conf]');
@@ -570,27 +677,18 @@
       setStatus('Обери файл зображення', 'err');
       return;
     }
+    if (cropDialog.open) cropDialog.close();
     selectedFile = file;
-    if (cropper) cropper.destroy();
+    savedCrop = null;
     if (preview.src) URL.revokeObjectURL(preview.src);
     preview.src = URL.createObjectURL(file);
+    showSelection(file);
     cropBox.classList.remove('hidden');
-    cropTools.classList.remove('hidden');
-    cropper = new Cropper(preview, {
-      viewMode: 1,            // keep the frame inside the image
-      autoCropArea: 1,        // start with the whole image selected
-      background: false,
-      // Dragging anywhere pans the image (also under the frame); the frame is
-      // resized by its handles. Otherwise a frame that fills the view could
-      // not be panned at all.
-      dragMode: 'move',
-      cropBoxMovable: false,
-      toggleDragModeOnDblclick: false,
-      // Modern browsers already apply the photo's EXIF rotation when drawing
-      // the image; letting Cropper.js apply it again would rotate it twice.
-      checkOrientation: false,
-    });
+    imageTools.classList.remove('hidden');
     dropzone.classList.add('hidden');
+    runHint.classList.add('hidden');
+    document.getElementById('shortcutHint').classList.remove('hidden');
+    showSettings(true);
     setBusy(false);
     setStatus('');
     resultPanel.classList.add('hidden');
@@ -602,6 +700,9 @@
   function rotate(degrees) {
     cropper.clear();
     cropper.rotate(degrees);
+    fitImage();
+  }
+  function fitImage() {
     const box = cropper.getContainerData();
     const image = cropper.getCanvasData();
     const k = Math.min(box.width / image.width, box.height / image.height);
@@ -617,9 +718,72 @@
     cropper.reset();
   });
 
+  function showSelection(file) {
+    showingPage = false;
+    wordBox.classList.add('hidden');
+    document.getElementById('dropHint').classList.remove('hidden');
+    document.getElementById('pageHint').classList.add('hidden');
+    sendFile = file;
+    if (shown.src) URL.revokeObjectURL(shown.src);
+    shown.src = URL.createObjectURL(file);
+  }
+
+  // The crop window opens on the original image with the last frame and
+  // rotation, so the selection can be adjusted rather than redone.
+  document.getElementById('editBtn').addEventListener('click', () => {
+    cropDialog.showModal();
+    cropper = new Cropper(preview, {
+      viewMode: 1,            // keep the frame inside the image
+      autoCropArea: 1,        // start with the whole image selected
+      background: false,
+      // Dragging anywhere pans the image (also under the frame); the frame is
+      // resized by its handles. Otherwise a frame that fills the view could
+      // not be panned at all.
+      dragMode: 'move',
+      cropBoxMovable: false,
+      toggleDragModeOnDblclick: false,
+      // Modern browsers already apply the photo's EXIF rotation when drawing
+      // the image; letting Cropper.js apply it again would rotate it twice.
+      checkOrientation: false,
+      ready() {
+        if (!savedCrop) return;
+        if (savedCrop.rotate) rotate(savedCrop.rotate);
+        cropper.setData({ x: savedCrop.x, y: savedCrop.y, width: savedCrop.width, height: savedCrop.height });
+      },
+    });
+  });
+
+  // Esc and "Скасувати" both just close: the previous selection stays.
+  document.getElementById('cropCancelBtn').addEventListener('click', () => cropDialog.close());
+  cropDialog.addEventListener('close', () => {
+    if (cropper) { cropper.destroy(); cropper = null; }
+  });
+  cropDialog.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'BUTTON') {
+      e.preventDefault();
+      cropDoneBtn.click();
+    }
+  });
+
+  cropDoneBtn.addEventListener('click', async () => {
+    if (!cropper) return;
+    cropDoneBtn.disabled = true;
+    try {
+      savedCrop = cropper.getData(true);
+      showSelection(await cropToFile());
+      // The result on screen came from the old selection.
+      if (!resultPanel.classList.contains('hidden')) resultPanel.classList.add('stale');
+      cropDialog.close();
+    } catch (err) {
+      setStatus('Помилка: ' + err.message, 'err');
+    } finally {
+      cropDoneBtn.disabled = false;
+    }
+  });
+
   // The crop is exported at the original resolution, not the preview's.
   // JPEG keeps a full-page crop well under the 20 MB upload limit.
-  function imageToSend() {
+  function cropToFile() {
     // Zooming also changes which part the frame covers, so compare the frame
     // with the whole image instead of tracking edits.
     const d = cropper.getData(true), img = cropper.getImageData();
@@ -652,6 +816,15 @@
     pickFile(file);
   });
 
+  // Dropping a file on the shown image replaces it.
+  ['dragenter', 'dragover'].forEach(evt =>
+    cropBox.addEventListener(evt, (e) => { e.preventDefault(); if (!activeController) cropBox.classList.add('drag'); })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    cropBox.addEventListener(evt, (e) => { e.preventDefault(); cropBox.classList.remove('drag'); })
+  );
+  cropBox.addEventListener('drop', (e) => pickFile(e.dataTransfer.files && e.dataTransfer.files[0]));
+
   // Paste from clipboard (screenshot -> Cmd/Ctrl+V)
   document.addEventListener('paste', (e) => {
     const items = e.clipboardData && e.clipboardData.items;
@@ -669,6 +842,8 @@
     const controller = new AbortController();
     activeController = controller;
     setBusy(true);
+    // Recognition reads the selected part; show it, not an earlier page.
+    if (showingPage) showSelection(sendFile);
     resultPanel.classList.add('hidden');
 
     const isDeepseek = engineSel.value === 'deepseek';
@@ -684,7 +859,8 @@
 
     const form = new FormData();
     form.append('mode', modeSel.value);
-    const output = isDeepseek ? 'json' : outputSel.value;
+    // Word check asks for "words": the TSV plus the page its boxes refer to.
+    const output = isDeepseek ? 'json' : outputSel.value === 'tsv' ? 'words' : outputSel.value;
     form.append('output', output);
     form.append('engine', engineSel.value);
     if (isDeepseek) {
@@ -699,11 +875,12 @@
     }
 
     try {
-      form.append('file', await imageToSend());
+      form.append('file', sendFile);
       const resp = await fetch('/ocr', {
         method: 'POST', body: form, headers, signal: controller.signal,
       });
       if (resp.status === 401) {
+        showSettings(true);
         tokenRow.classList.remove('hidden');
         tokenInput.focus();
         throw new Error('сервер вимагає API токен. Введи його й натисни «' + runBtn.textContent + '» ще раз');
@@ -715,11 +892,13 @@
           : 'сервер повернув помилку (HTTP ' + resp.status + ')');
       }
       const seconds = fmtSeconds((Date.now() - startedAt) / 1000);
-      resultRendered.classList.toggle('words', output === 'tsv');
-      wordTools.classList.toggle('hidden', output !== 'tsv');
-      resultRendered.contentEditable = output === 'tsv' ? 'true' : 'false';
-      if (output === 'tsv') {
-        resultText.value = renderWords(await resp.text());
+      resultRendered.classList.toggle('words', output === 'words');
+      wordTools.classList.toggle('hidden', output !== 'words');
+      resultRendered.contentEditable = output === 'words' ? 'true' : 'false';
+      if (output === 'words') {
+        const data = await resp.json();
+        resultText.value = renderWords(data.tsv);
+        showPage(data.image);
         wordInfo.textContent = 'Натисни на підсвічене слово, щоб побачити впевненість. Текст можна виправляти прямо тут.';
         updateWordCounts();
         resultPanel.classList.remove('hidden');
@@ -757,14 +936,33 @@
   });
 
   const scrollBehavior = () => matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  // Once there is a result, the settings shrink to one line so the text
+  // starts near the top of the screen.
+  const checkedLabel = (name) =>
+    settingsForm.querySelector(`input[name=${name}]:checked + span`).firstChild.textContent.trim();
+  function showSettings(open) {
+    settingsForm.classList.toggle('hidden', !open);
+    settingsSummary.classList.toggle('hidden', open);
+    if (open) return;
+    const parts = [checkedLabel('mode'), checkedLabel('engine')];
+    if (engineSel.value === 'deepseek') parts.push('деталізація ' + checkedLabel('speedProfile').toLowerCase());
+    else if (outputSel.value === 'tsv') parts.push('з перевіркою слів');
+    summaryText.textContent = parts.join(', ');
+  }
+  document.getElementById('changeSettingsBtn').addEventListener('click', () => {
+    showSettings(true);
+    settingsForm.querySelector('input:checked').focus();
+  });
+
   function showResult() {
+    showSettings(false);
     resultPanel.classList.remove('stale');
     resultPanel.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
   }
 
   // Ctrl/Cmd+Enter starts recognition from anywhere, including the textarea.
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !runBtn.disabled) runBtn.click();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !runBtn.disabled && !cropDialog.open) runBtn.click();
   });
 
   downloadBtn.addEventListener('click', () => {
