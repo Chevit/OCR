@@ -6,188 +6,218 @@
 <title>OCR</title>
 <link rel="stylesheet" href="/static/vendor/cropper.min.css">
 <style>
+  /* Scanner bed: the image lies on grey glass, the text comes out on paper. */
   :root {
     color-scheme: light dark;
-    --bg: #f5f5f7;
-    --panel: #ffffff;
-    --border: #d8d8dd;
-    --text: #1c1c1e;
-    --muted: #6b6b70;
-    --accent: #2f6fed;
-    --accent-hover: #2559c4;
-    --ok: #1a7f37;
-    --err: #c0392b;
+    --bed: #E6EBEE;      /* page */
+    --glass: #CDD6DC;    /* behind the image */
+    --paper: #FFFFFF;    /* settings and result */
+    --ink: #18202B;
+    --graphite: #5A6472;
+    --line: #CBD3D9;
+    --lamp: #00806C;     /* primary action and scan line */
+    --lamp-hover: #006B5A;
+    --on-lamp: #FFFFFF;
+    --err: #B42318;
+    --reading: "PT Serif", "Noto Serif", Georgia, serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #121214;
-      --panel: #1c1c1f;
-      --border: #303034;
-      --text: #f0f0f2;
-      --muted: #9a9aa0;
-      --accent: #5b8def;
-      --accent-hover: #7ba3f2;
+      --bed: #12171C;
+      --glass: #0B0F13;
+      --paper: #1B2229;
+      --ink: #E8EDF1;
+      --graphite: #93A0AC;
+      --line: #2E3842;
+      --lamp: #2BB59C;
+      --lamp-hover: #4CC9B2;
+      --on-lamp: #06201B;
+      --err: #F97066;
     }
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    padding: 16px;
+    background: var(--bed);
+    color: var(--ink);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  .wrap { max-width: 780px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 8px 0 4px; }
-  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
-
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-
-  .dropzone {
-    display: block;
-    width: 100%;
-    font: inherit;
-    color: inherit;
-    background: none;
-    border: 2px dashed var(--border);
-    border-radius: 10px;
-    padding: 32px 16px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color .15s, background .15s;
-  }
-  .dropzone.drag { border-color: var(--accent); background: rgba(47,111,237,.06); }
-  .dropzone > span { display: block; margin: 6px 0; color: var(--muted); font-size: 14px; }
+  :focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+  .hidden { display: none !important; }
   /* Touch screens can't drag files or use a mouse wheel. */
   .touch { display: none; }
   @media (hover: none) { .touch { display: inline; } .mouse { display: none !important; } }
-  .dropzone strong { color: var(--text); }
+
+  header {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 18px 20px 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--graphite); font-size: 14px; }
+
+  .app {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 12px 20px 24px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+  @media (min-width: 960px) {
+    .app { grid-template-columns: minmax(0, 7fr) minmax(380px, 5fr); align-items: start; }
+    .bed { position: sticky; top: 12px; }
+  }
+
+  /* Left: the image */
+  .dropzone {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: min(70vh, 640px);
+    padding: 32px 20px;
+    font: inherit;
+    color: var(--ink);
+    background: var(--glass);
+    border: 2px dashed var(--line);
+    border-radius: 14px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .dropzone strong { font-size: 18px; }
+  .dropzone > span { color: var(--graphite); font-size: 14px; }
+  .dropzone:hover, .dropzone.drag { border-color: var(--lamp); }
+  .dropzone.drag { background: color-mix(in srgb, var(--lamp) 10%, var(--glass)); }
   #fileInput { display: none; }
 
   /* Cropper.js sizes its editor to this box, so it needs a fixed height. */
-  .crop-box { height: 60vh; margin-top: 14px; }
+  .crop-box {
+    position: relative;
+    height: min(72vh, 760px);
+    background: var(--glass);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  @media (max-width: 959px) { .crop-box { height: 55vh; } }
   .crop-box img { display: block; max-width: 100%; }
+  .crop-box .cropper-modal { background: var(--glass); opacity: .6; }
+  .crop-box .cropper-view-box { outline-color: var(--lamp); }
+  .crop-box .cropper-line, .crop-box .cropper-point { background-color: var(--lamp); }
 
-  .row {
+  /* While recognizing, a lamp line sweeps the page like a scanner. */
+  .crop-box.scanning::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 3px;
+    background: var(--lamp);
+    box-shadow: 0 0 22px 6px color-mix(in srgb, var(--lamp) 55%, transparent);
+    pointer-events: none;
+    z-index: 5;
+    animation: scan 2.6s ease-in-out infinite alternate;
+  }
+  @keyframes scan { to { top: calc(100% - 3px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .crop-box.scanning::after { animation: none; top: auto; bottom: 0; }
+  }
+
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+  .hint { color: var(--graphite); font-size: 13px; }
+
+  /* Right: settings and result, on paper */
+  .sheet {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+  .settings { margin: 0; padding: 18px 18px 0; border: 0; min-width: 0; }
+  .group { margin: 0 0 16px; padding: 0; border: 0; min-width: 0; }
+  .group legend { padding: 0; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--graphite); }
+
+  .seg {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding: 3px;
+    background: var(--bed);
+    border-radius: 10px;
+  }
+  .seg label { flex: 1 1 auto; position: relative; }
+  .seg input { position: absolute; inset: 0; opacity: 0; margin: 0; }
+  .seg span {
+    display: block;
+    padding: 7px 10px;
+    border-radius: 7px;
+    text-align: center;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--graphite);
+  }
+  .seg small { display: block; font-size: 12px; }
+  .seg input:checked + span {
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(24, 32, 43, .12), 0 0 0 1px var(--line);
+  }
+  .seg input:checked + span small { font-weight: 400; color: var(--graphite); }
+  .seg input:focus-visible + span { outline: 2px solid var(--lamp); outline-offset: 1px; }
+  .settings:disabled .seg span { cursor: default; opacity: .6; }
+
+  button, input[type="password"] {
+    font: inherit;
+    font-size: 14px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+  }
+  input[type="password"] { width: 100%; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost:hover:not(:disabled) { background: var(--bed); }
+  button.icon { min-width: 40px; font-size: 20px; line-height: 1; padding: 6px 10px; }
+
+  /* Stays in reach at the bottom of the screen on long pages and phones. */
+  .run-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 10;
     display: flex;
     gap: 10px;
     align-items: center;
     flex-wrap: wrap;
-    margin-top: 16px;
+    padding: 12px 18px;
+    background: var(--paper);
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 14px 14px;
   }
-
-  .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  .field-row { align-items: flex-end; }
-
-  select, button, input {
-    font-size: 14px;
-    padding: 9px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--panel);
-    color: var(--text);
-  }
-
   button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    cursor: pointer;
+    background: var(--lamp);
+    border-color: var(--lamp);
+    color: var(--on-lamp);
     font-weight: 600;
+    font-size: 15px;
+    padding: 10px 22px;
   }
-  button.primary:hover { background: var(--accent-hover); }
-  button.primary:disabled { opacity: .5; cursor: default; }
+  button.primary:hover:not(:disabled) { background: var(--lamp-hover); border-color: var(--lamp-hover); }
+  button.stop { color: var(--err); border-color: currentColor; font-weight: 600; }
+  .run-bar .hint { margin-left: auto; }
 
-  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  button.ghost { cursor: pointer; }
-  button.ghost:hover { background: var(--bg); }
-
-  button.stop {
-    color: var(--err);
-    border-color: currentColor;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  button.stop:hover { background: color-mix(in srgb, var(--err) 10%, var(--panel)); }
-  button.stop:disabled { opacity: .5; cursor: default; }
-
-  .dropzone.busy { cursor: wait; opacity: .6; pointer-events: none; }
-
-  .status { font-size: 14px; margin-top: 12px; color: var(--muted); }
+  .status { padding: 0 18px 14px; font-size: 14px; color: var(--graphite); }
   .status:empty { display: none; }
-  .status.ok { color: var(--ok); }
+  .status.ok { color: var(--lamp); }
   .status.err { color: var(--err); }
-  .profile-hint { color: var(--muted); font-size: 12px; }
-  #tokenInput { flex: 1; min-width: 220px; font-size: 13px; padding: 8px 10px; }
-
-  textarea {
-    width: 100%;
-    min-height: 220px;
-    margin-top: 14px;
-    padding: 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    resize: vertical;
-  }
-
-  .markdown-body {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px 18px;
-    margin-top: 14px;
-    max-height: 460px;
-    overflow: auto;
-    line-height: 1.55;
-  }
-  .markdown-body h1, .markdown-body h2, .markdown-body h3 {
-    margin-top: 1.2em;
-    margin-bottom: .4em;
-  }
-  .markdown-body h1:first-child, .markdown-body h2:first-child, .markdown-body h3:first-child {
-    margin-top: 0;
-  }
-  .markdown-body table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 10px 0;
-    font-size: 14px;
-  }
-  .markdown-body th, .markdown-body td {
-    border: 1px solid var(--border);
-    padding: 6px 10px;
-    text-align: left;
-  }
-  .markdown-body code {
-    background: rgba(127,127,127,.15);
-    padding: 1px 5px;
-    border-radius: 4px;
-    font-size: 13px;
-  }
-  .markdown-body ul, .markdown-body ol { padding-left: 1.4em; }
-
-  /* Tesseract word confidence: sure words stay unmarked. */
-  .markdown-body.words { white-space: pre-wrap; }
-  .conf-mid { background: rgba(255, 196, 0, .4); border-radius: 3px; }
-  .conf-low { background: rgba(230, 50, 50, .4); border-radius: 3px; }
-  .markdown-body.words span[title] { cursor: help; }
-
-  .hidden { display: none !important; }
   .spinner {
     width: 14px; height: 14px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
+    border: 2px solid var(--line);
+    border-top-color: var(--lamp);
     border-radius: 50%;
     animation: spin .7s linear infinite;
     display: inline-block;
@@ -195,91 +225,128 @@
     margin-right: 6px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .result { margin-top: 20px; padding: 16px 18px 18px; }
+  .result-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .result-head h2 { font-size: 16px; margin: 0 auto 0 0; }
+  .result-head button { font-size: 13px; padding: 6px 10px; }
+  #confLegend { width: 100%; order: 5; }
+
+  /* The transcript is set for reading and proofreading, not as code. */
+  textarea, .transcript {
+    width: 100%;
+    font-family: var(--reading);
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  textarea {
+    display: block;
+    min-height: 320px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    resize: vertical;
+  }
+  textarea:focus-visible { outline: 1px dashed var(--line); outline-offset: 6px; }
+  .transcript { max-height: 70vh; overflow: auto; }
+
+  /* Tesseract word confidence: sure words stay unmarked. */
+  .transcript.words { white-space: pre-wrap; }
+  .transcript.words span[title] { cursor: help; }
+  .conf-mid { background: rgba(255, 196, 0, .4); border-radius: 3px; }
+  .conf-low { background: rgba(230, 50, 50, .4); border-radius: 3px; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<header>
   <h1>OCR</h1>
-  <div class="sub">Завантаж зображення — отримай розпізнаний текст</div>
+  <p>Текст із фото, сканів і знімків екрана</p>
+</header>
 
-  <div class="panel">
+<main class="app">
+  <section class="bed" aria-label="Зображення">
     <button type="button" class="dropzone" id="dropzone">
-      <strong class="mouse">Перетягни зображення сюди або натисни, щоб обрати файл</strong>
+      <strong class="mouse">Перетягни зображення сюди</strong>
       <strong class="touch">Сфотографуй або обери зображення</strong>
-      <span>PNG, JPG, WEBP<span class="mouse">. Можна вставити знімок екрана: Ctrl+V / ⌘V</span></span>
+      <span class="mouse">або натисни, щоб обрати файл, чи встав знімок екрана: Ctrl+V / ⌘V</span>
+      <span>PNG, JPG, WEBP</span>
     </button>
     <input type="file" id="fileInput" accept="image/*">
-    <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Прев'ю"></div>
-    <div class="row hidden" id="cropTools">
-      <button class="ghost" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
-      <button class="ghost" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
+    <div class="crop-box hidden" id="cropBox"><img id="preview" alt="Обране зображення"></div>
+    <div class="tools hidden" id="cropTools">
+      <button class="ghost icon" id="rotateLeftBtn" type="button" title="Повернути ліворуч" aria-label="Повернути ліворуч">⟲</button>
+      <button class="ghost icon" id="rotateRightBtn" type="button" title="Повернути праворуч" aria-label="Повернути праворуч">⟳</button>
       <button class="ghost" id="resetCropBtn" type="button">Скинути</button>
       <button class="ghost" id="otherFileBtn" type="button">Інше зображення</button>
-      <span class="profile-hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб.</span></span>
+      <span class="hint">Потягни за кути рамки, щоб обрізати.<span class="mouse"> Колесо миші змінює масштаб.</span></span>
+    </div>
+  </section>
+
+  <section aria-label="Розпізнавання">
+    <div class="sheet">
+      <form id="settingsForm" onsubmit="return false">
+        <fieldset class="settings" id="settings">
+          <fieldset class="group">
+            <legend>Що на зображенні</legend>
+            <div class="seg">
+              <label><input type="radio" name="mode" value="text" checked><span>Текст</span></label>
+              <label><input type="radio" name="mode" value="table"><span>Таблиця</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="group">
+            <legend>Як розпізнати</legend>
+            <div class="seg">
+              <label><input type="radio" name="engine" value="tesseract" checked><span>Швидко<small>секунди, Tesseract</small></span></label>
+              <label><input type="radio" name="engine" value="deepseek"><span>ШІ-модель<small>хвилини, DeepSeek</small></span></label>
+            </div>
+          </fieldset>
+          <fieldset class="group" id="speedField">
+            <legend>Деталізація</legend>
+            <div class="seg">
+              <label><input type="radio" name="speedProfile" value="fast"><span>Низька<small>швидше</small></span></label>
+              <label><input type="radio" name="speedProfile" value="balanced" checked><span>Середня<small>&nbsp;</small></span></label>
+              <label><input type="radio" name="speedProfile" value="detailed"><span>Висока<small>повільніше</small></span></label>
+            </div>
+          </fieldset>
+          <fieldset class="group" id="outputField">
+            <legend>Що отримати</legend>
+            <div class="seg">
+              <label><input type="radio" name="output" value="json" checked><span>Текст</span></label>
+              <label><input type="radio" name="output" value="tsv"><span>Текст з перевіркою слів</span></label>
+              <label><input type="radio" name="output" value="pdf"><span>PDF з текстовим шаром</span></label>
+            </div>
+          </fieldset>
+          <div class="group hidden" id="tokenRow">
+            <label class="hint" for="tokenInput">Сервер вимагає API токен</label>
+            <input type="password" id="tokenInput" autocomplete="off">
+          </div>
+        </fieldset>
+      </form>
+      <div class="status" id="status" role="status" aria-live="polite"></div>
+      <div class="run-bar">
+        <button class="primary" id="runBtn" type="button" disabled>Розпізнати</button>
+        <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
+        <span class="hint mouse">Ctrl+Enter / ⌘Enter</span>
+      </div>
     </div>
 
-    <div class="row field-row">
-      <label class="field">Що на зображенні
-        <select id="mode">
-          <option value="text">Текст</option>
-          <option value="table">Таблиця</option>
-          <option value="figure">Схема або рисунок</option>
-          <option value="document">Документ</option>
-        </select>
-      </label>
-      <label class="field">Як розпізнати
-        <select id="engine">
-          <option value="tesseract" selected>Швидко, секунди (Tesseract)</option>
-          <option value="deepseek">Точно, хвилини (DeepSeek)</option>
-        </select>
-      </label>
-      <label class="field" id="speedField">Деталізація
-        <select id="speedProfile">
-          <option value="fast">Низька, швидше</option>
-          <option value="balanced" selected>Середня</option>
-          <option value="detailed">Висока, повільніше</option>
-        </select>
-      </label>
-      <label class="field" id="outputField">Що отримати
-        <select id="output">
-          <option value="json">Звичайний текст</option>
-          <option value="tsv">Текст з перевіркою слів</option>
-          <option value="pdf">PDF з текстовим шаром</option>
-        </select>
-      </label>
+    <div class="sheet result hidden" id="resultPanel">
+      <div class="result-head">
+        <h2>Результат</h2>
+        <button class="ghost" id="copyBtn" type="button">Скопіювати</button>
+        <button class="ghost" id="downloadBtn" type="button">Завантажити</button>
+        <span class="hint hidden" id="confLegend">
+          <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> Натисни на слово, щоб побачити впевненість
+        </span>
+      </div>
+      <div id="resultRendered" class="transcript hidden"></div>
+      <textarea id="resultText" aria-label="Розпізнаний текст, можна редагувати"></textarea>
     </div>
-    <div class="row hidden" id="tokenRow">
-      <label class="field" style="flex:1">Сервер вимагає API токен
-        <input type="password" id="tokenInput" autocomplete="off">
-      </label>
-    </div>
-    <div class="row">
-      <button class="primary" id="runBtn" disabled>Розпізнати</button>
-      <button class="stop hidden" id="stopBtn" type="button">Зупинити</button>
-      <span class="profile-hint mouse">Ctrl+Enter / ⌘Enter</span>
-    </div>
-    <div class="status" id="status" role="status" aria-live="polite"></div>
-  </div>
-
-  <div class="panel hidden" id="resultPanel">
-    <div class="row" style="margin-top:0">
-      <strong>Результат</strong>
-      <span class="profile-hint hidden" id="confLegend">
-        <span class="conf-mid">&nbsp;сумнівно&nbsp;</span> <span class="conf-low">&nbsp;ймовірно помилка&nbsp;</span> Натисни на слово, щоб побачити впевненість
-      </span>
-      <span style="margin-left:auto"></span>
-      <button class="ghost hidden" id="viewToggleBtn">Сирий Markdown</button>
-      <button class="ghost" id="copyBtn">Скопіювати</button>
-      <button class="ghost" id="downloadBtn">Завантажити</button>
-    </div>
-    <div id="resultRendered" class="markdown-body hidden"></div>
-    <textarea id="resultText" aria-label="Розпізнаний текст, можна редагувати"></textarea>
-  </div>
-</div>
+  </section>
+</main>
 
 <!-- Served from this repo so the page works without internet access. -->
-<script src="/static/vendor/marked.min.js"></script>
-<script src="/static/vendor/purify.min.js"></script>
 <script src="/static/vendor/cropper.min.js"></script>
 <script>
   const dropzone = document.getElementById('dropzone');
@@ -290,28 +357,24 @@
   const cropButtons = cropTools.querySelectorAll('button');
   const runBtn = document.getElementById('runBtn');
   const stopBtn = document.getElementById('stopBtn');
-  const engineSel = document.getElementById('engine');
-  const speedProfile = document.getElementById('speedProfile');
-  const modeSel = document.getElementById('mode');
-  const outputSel = document.getElementById('output');
+  // Radio groups: .value reads and sets the checked option.
+  const settingsForm = document.getElementById('settingsForm');
+  const settings = document.getElementById('settings');
+  const { engine: engineSel, speedProfile, mode: modeSel, output: outputSel } = settingsForm.elements;
   const confLegend = document.getElementById('confLegend');
   const statusEl = document.getElementById('status');
   const resultPanel = document.getElementById('resultPanel');
   const resultText = document.getElementById('resultText');
   const resultRendered = document.getElementById('resultRendered');
-  const viewToggleBtn = document.getElementById('viewToggleBtn');
   const copyBtn = document.getElementById('copyBtn');
   const tokenInput = document.getElementById('tokenInput');
   const tokenRow = document.getElementById('tokenRow');
   const speedField = document.getElementById('speedField');
   const outputField = document.getElementById('outputField');
   const downloadBtn = document.getElementById('downloadBtn');
-  const docOption = modeSel.querySelector('option[value="document"]');
   const fmtSeconds = s => Number(s).toLocaleString('uk', { maximumFractionDigits: 1 });
 
   let selectedFile = null;
-  let isDocumentMode = false;
-  let showingRendered = false;
   let activeController = null;
   let cropper = null;
   const profiles = {
@@ -326,11 +389,8 @@
 
   function setBusy(busy) {
     runBtn.disabled = busy || !selectedFile;
-    modeSel.disabled = busy;
-    outputSel.disabled = busy;
-    engineSel.disabled = busy;
-    speedProfile.disabled = busy;
-    tokenInput.disabled = busy;
+    settings.disabled = busy;
+    cropBox.classList.toggle('scanning', busy);
     stopBtn.disabled = !busy;
     stopBtn.classList.toggle('hidden', !busy);
     dropzone.classList.toggle('busy', busy);
@@ -338,31 +398,12 @@
     if (cropper) busy ? cropper.disable() : cropper.enable();
   }
 
-  function renderMarkdownPreview() {
-    // Returns false if the vendored libraries failed to load, so the caller
-    // falls back to raw text instead of showing an empty panel.
-    if (!window.marked || !window.DOMPurify) return false;
-    resultRendered.innerHTML = DOMPurify.sanitize(marked.parse(resultText.value));
-    return true;
-  }
-
-  function setResultView(rendered) {
-    showingRendered = rendered && isDocumentMode;
-    resultRendered.classList.toggle('hidden', !showingRendered);
-    resultText.classList.toggle('hidden', showingRendered);
-    viewToggleBtn.textContent = showingRendered ? 'Сирий Markdown' : 'Показати як документ';
-  }
-
-  viewToggleBtn.addEventListener('click', () => setResultView(!showingRendered && renderMarkdownPreview()));
-
   // The speed profile only tunes DeepSeek (image size, token limit).
   function updateEngineUi() {
     const isDeepseek = engineSel.value === 'deepseek';
     speedField.classList.toggle('hidden', !isDeepseek);
     // Word confidence and PDF come from Tesseract only.
     outputField.classList.toggle('hidden', isDeepseek);
-    // Only DeepSeek returns Markdown.
-    docOption.textContent = isDeepseek ? 'Документ (Markdown)' : 'Документ';
     updateRunLabel();
   }
 
@@ -371,7 +412,6 @@
     const pdf = engineSel.value !== 'deepseek' && outputSel.value === 'pdf';
     runBtn.textContent = pdf ? 'Створити PDF' : 'Розпізнати';
   }
-  outputSel.addEventListener('change', updateRunLabel);
 
   // Confidence (0-100) at or above which a word counts as sure / doubtful.
   const CONF_SURE = 85, CONF_DOUBT = 60;
@@ -418,10 +458,12 @@
   }
   try {
     const savedEngine = localStorage.getItem('ocr_engine');
-    if ([...engineSel.options].some(o => o.value === savedEngine)) engineSel.value = savedEngine;
+    if ([...engineSel].some(r => r.value === savedEngine)) engineSel.value = savedEngine;
   } catch {}
-  engineSel.addEventListener('change', () => {
-    try { localStorage.setItem('ocr_engine', engineSel.value); } catch {}
+  settingsForm.addEventListener('change', (e) => {
+    if (e.target.name === 'engine') {
+      try { localStorage.setItem('ocr_engine', engineSel.value); } catch {}
+    }
     updateEngineUi();
   });
   updateEngineUi();
@@ -600,8 +642,6 @@
       if (output === 'tsv') {
         resultText.value = renderWords(await resp.text());
         resultPanel.classList.remove('hidden');
-        isDocumentMode = false;
-        viewToggleBtn.classList.add('hidden');
         resultRendered.classList.remove('hidden');
         resultText.classList.add('hidden');
         setStatus('Готово за ' + seconds + ' с', 'ok');
@@ -611,14 +651,8 @@
       const data = await resp.json();
       resultText.value = data.text || '';
       resultPanel.classList.remove('hidden');
-      // Tesseract returns plain text, so there is no Markdown to render.
-      isDocumentMode = data.mode === 'document' && data.engine !== 'tesseract';
-      viewToggleBtn.classList.toggle('hidden', !isDocumentMode);
-      if (isDocumentMode) {
-        setResultView(renderMarkdownPreview());
-      } else {
-        setResultView(false);
-      }
+      resultRendered.classList.add('hidden');
+      resultText.classList.remove('hidden');
       if (data.truncated) {
         // The server's warning names the actual cause (loop, token limit, time limit).
         setStatus('Готово за ' + fmtSeconds(data.seconds) + ' с. ' + (data.warning || 'Текст може бути неповним.'), 'err');
@@ -657,9 +691,8 @@
   });
 
   downloadBtn.addEventListener('click', () => {
-    const ext = isDocumentMode ? '.md' : '.txt';
     download(new Blob([resultText.value], { type: 'text/plain;charset=utf-8' }),
-      selectedFile.name.replace(/\.[^.]*$/, '') + ext);
+      selectedFile.name.replace(/\.[^.]*$/, '') + '.txt');
   });
 
   stopBtn.addEventListener('click', () => {

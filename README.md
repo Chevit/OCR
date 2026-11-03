@@ -5,8 +5,8 @@ with 16 GB RAM. It has two engines:
 
 | Engine | UI label | Speed on the Pi | Best for |
 | --- | --- | --- | --- |
-| `tesseract` | Швидко (Tesseract) | seconds | clean printed documents in Ukrainian and English |
-| `deepseek` | Точно (DeepSeek) | a minute or more | difficult photos, handwriting-like or mixed layouts, Markdown output |
+| `tesseract` | Швидко | seconds | clean printed documents in Ukrainian and English |
+| `deepseek` | ШІ-модель | a minute or more | difficult photos, handwriting-like or mixed layouts |
 
 [Tesseract](https://github.com/tesseract-ocr/tesseract) runs inside the service
 container. [DeepSeek-OCR](https://ollama.com/library/deepseek-ocr) runs through
@@ -33,10 +33,11 @@ Pi address with `hostname -I`.
 
 ## Use
 
-Upload or paste a PNG, JPG, or WEBP image, choose an engine and a mode, and
-select **Розпізнати**. The UI defaults to Tesseract and remembers the last
-engine. With DeepSeek, the document mode returns Markdown and can switch between
-a rendered preview and raw Markdown. Tesseract always returns plain text.
+Upload or paste a PNG, JPG, or WEBP image, choose **Текст** or **Таблиця** and
+an engine, and select **Розпізнати**. The UI defaults to Tesseract and remembers
+the last engine. The result is editable and can be copied or saved as .txt.
+The `figure` and `document` modes (DeepSeek returns Markdown for `document`)
+are available through the API only.
 
 The API uses the same upload flow:
 
