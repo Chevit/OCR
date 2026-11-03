@@ -60,7 +60,7 @@ class TesseractEngineTests(unittest.TestCase):
 
             body = response.json()
             self.assertEqual(body["text"], "Привіт\n\n\nHello")
-            self.assertEqual(body["model"], "tesseract (ukr+eng)")
+            self.assertEqual(body["model"], "tesseract fast (ukr+eng)")
 
     def test_tsv_output_returns_raw_tesseract_file(self):
         body = b"level\tpage_num\n5\t1\n"

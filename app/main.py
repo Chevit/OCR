@@ -22,6 +22,9 @@ TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "ukr+eng")
 # Tesseract needs detail (~300 DPI): an A4 page at 300 DPI is ~8.7 MP.
 TESSERACT_MAX_MEGAPIXELS = float(os.environ.get("TESSERACT_MAX_MEGAPIXELS", "8"))
 TESSERACT_TIMEOUT = float(os.environ.get("TESSERACT_TIMEOUT", "120"))
+# Models from tessdata_best: slower, usually more accurate. The default
+# (fast) models come with the tesseract packages; the image adds these.
+TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_best")
 
 # Tesseract page segmentation mode per OCR mode: 3 = automatic layout,
 # 6 = one uniform block read row by row (keeps table rows together).
@@ -172,7 +175,8 @@ async def detect_rotation(image_png: bytes) -> int:
 
 
 async def tesseract_ocr(
-    raw: bytes, mode: str, max_megapixels: float, renderer: Optional[str] = None
+    raw: bytes, mode: str, max_megapixels: float, renderer: Optional[str] = None,
+    model: str = "fast",
 ) -> tuple[bytes, bytes]:
     """Returns Tesseract's raw output (plain text by default, or the file of
     the given renderer: "tsv" = words with confidence and position) and the
@@ -182,7 +186,7 @@ async def tesseract_ocr(
     rotation = await detect_rotation(image_png)
     if rotation:
         image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
-    return await run_tesseract(image_png, mode, renderer), image_png
+    return await run_tesseract(image_png, mode, renderer, model), image_png
 
 
 def to_jpeg_data_url(image_png: bytes) -> str:
@@ -192,12 +196,15 @@ def to_jpeg_data_url(image_png: bytes) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-async def run_tesseract(image_png: bytes, mode: str, renderer: Optional[str] = None) -> bytes:
+async def run_tesseract(
+    image_png: bytes, mode: str, renderer: Optional[str] = None, model: str = "fast"
+) -> bytes:
     """Run the tesseract CLI on a PNG passed through stdin (no temp files, so
     patient documents never touch the disk)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             TESSERACT_CMD, "stdin", "stdout",
+            *(["--tessdata-dir", TESSDATA_BEST_DIR] if model == "best" else []),
             "-l", TESSERACT_LANGS,
             "--psm", str(TESSERACT_PSM[mode]),
             "-c", "preserve_interword_spaces=1",
@@ -308,6 +315,7 @@ async def ocr(
     mode: Literal["text", "table"] = Form("text"),
     output: Literal["text", "json", "tsv", "words"] = Form("json"),
     max_megapixels: Optional[float] = Form(None),
+    model: Literal["fast", "best"] = Form("fast"),
     authorization: Optional[str] = Header(None),
 ):
     check_auth(authorization)
@@ -324,11 +332,17 @@ async def ocr(
     if max_megapixels is not None and max_megapixels <= 0:
         raise HTTPException(status_code=400, detail="max_megapixels має бути більше 0")
 
+    if model == "best" and not os.path.isdir(TESSDATA_BEST_DIR):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Точні моделі не встановлено на сервері. Деталі: немає {TESSDATA_BEST_DIR}",
+        )
+
     renderer = "tsv" if output in ("tsv", "words") else None
     started = time.time()
     out, page_png = await cancel_on_disconnect(
         request,
-        tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer),
+        tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer, model),
     )
     if output == "words":
         # TSV word boxes are in the prepared page's pixels, so the page
@@ -350,7 +364,7 @@ async def ocr(
     return {
         "text": text,
         "mode": mode,
-        "model": f"tesseract ({TESSERACT_LANGS})",
+        "model": f"tesseract {model} ({TESSERACT_LANGS})",
         "seconds": round(time.time() - started, 2),
         "filename": file.filename,
     }
@@ -362,7 +376,7 @@ async def api_info():
         "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table, output=json|text|tsv|words, max_megapixels",
+            "POST /ocr": "multipart form: file, mode=text|table, output=json|text|tsv|words, max_megapixels, model=fast|best",
             "GET /health": "checks that Tesseract runs and has every language in TESSERACT_LANGS",
         },
     }
