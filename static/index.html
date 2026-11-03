@@ -703,14 +703,22 @@
   });
 
   copyBtn.addEventListener('click', async () => {
+    let ok = true;
     try {
       await navigator.clipboard.writeText(resultText.value);
-      copyBtn.textContent = 'Скопійовано!';
     } catch {
-      resultText.select();
-      document.execCommand('copy');
-      copyBtn.textContent = 'Скопійовано!';
+      // Over plain http (the Pi's address) the Clipboard API doesn't exist.
+      // The result textarea may be hidden (word check view), so copy from a
+      // temporary one instead.
+      const t = document.createElement('textarea');
+      t.value = resultText.value;
+      t.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.append(t);
+      t.select();
+      ok = document.execCommand('copy');
+      t.remove();
     }
+    copyBtn.textContent = ok ? 'Скопійовано!' : 'Не вдалося скопіювати';
     setTimeout(() => { copyBtn.textContent = 'Скопіювати'; }, 1500);
   });
 </script>
