@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.6
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -12,9 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Slower, usually more accurate models; the UI lets the user pick them.
-ADD --chmod=644 https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.1.0/ukr.traineddata \
-    https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/4.1.0/eng.traineddata \
-    /usr/share/tessdata_best/
+# Pinned to the tessdata_best 4.1.0 commit and checked by SHA-256.
+ADD --chmod=644 --checksum=sha256:1277f6e3b6f707063a92d40e7678e7f57154e8414e328e340be9ee9275eea9c8 \
+    https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e2aad9b983032bb1beff9133104a67cdbb87ca4d/ukr.traineddata \
+    /usr/share/tessdata_best/ukr.traineddata
+ADD --chmod=644 --checksum=sha256:8280aed0782fe27257a68ea10fe7ef324ca0f8d85bd2fd145d1c2b560bcb66ba \
+    https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e2aad9b983032bb1beff9133104a67cdbb87ca4d/eng.traineddata \
+    /usr/share/tessdata_best/eng.traineddata
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
