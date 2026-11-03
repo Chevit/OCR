@@ -11,6 +11,9 @@ sudo docker compose up -d --build
 curl http://localhost:8000/health
 ```
 
+Step-by-step setup for a Raspberry Pi or a Windows laptop, and removal, is in
+[DEPLOY.md](DEPLOY.md).
+
 `/health` returns 503 when Tesseract is missing or lacks a language from
 `TESSERACT_LANGS`; its `tesseract` block (`available`, `version`, `langs`,
 `missing_langs`) shows which.
