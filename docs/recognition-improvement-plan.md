@@ -62,8 +62,8 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - image-17 (baseline 0%): straightening filled corners white on a gray
   photographed page, Tesseract's Otsu then blacked out the whole sheet.
   Fixed: corners get the page's 90th-percentile gray (0 → 1435 characters).
-  v2 critical tokens unchanged; baseline loses image-9 tokens (accepted,
-  baseline path goes after holdout-2).
+  v2 critical tokens unchanged; baseline loses image-9 tokens (accepted;
+  the baseline path was later removed).
 - RapidOCR + PP-OCRv5 (bench only, offline image): critical tokens 90.3%
   vs 78.4%, word recall 72.8% vs 83.8% (и for і); on the Pi 116.5 s/image
   vs 10.3 for fast, 1.9 GB RAM per job. Not adopted.
@@ -92,17 +92,15 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - Фрагмент mode (`mode=block`, psm 6): the UI picks it after a crop and
   goes back to Текст when the crop is removed. Crops: CER 11.9% → 9.8%,
   critical 60.2% → 65.9%, same speed on the Pi. Фрагмент uses fast by
-  default (decided without holdout-2: best was +1.5 to +5.6 points of
+  default (decided on the sets we have: best was +1.5 to +5.6 points of
   critical tokens for 2.2–2.3x the time on the Pi, RESULTS.md (11), (13));
   best stays a user choice.
-- Holdout-2 layout ready: `Examples/holdout2/pages`, `Examples/holdout2/crops`
-  (crops named after their page, `image-20a`).
 - Baseline preparation and `PREPROCESS` removed (2026-11-10): v2 is the
   only path. Last baseline numbers on pages 1–10 (psm 3 fast): CER 34.0%,
   critical 61.8% vs v2 21.6% / 72.0% (RESULTS.md (14)); the bench prints
   them next to its report on `Examples/`.
-- Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
-  remove the baseline path; table TSV (step 5) not started.
+- No holdout-2: settings are final on the sets we have. New failures come
+  in as regression cases (bench README). Table TSV (step 5) not started.
 
 ## Findings so far
 
@@ -118,7 +116,8 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - Redact with paper-coloured (or white) boxes, never black. Keep realistic dark surroundings (phone UI, desks) — those are cases to measure.
 - Handwritten pages in a separate folder.
 - Selection set: `Examples/` (images 1–10; image-7 still has no ground truth). Old holdout `Examples/holdout/` (11–19) is now seen (image-12 was
-  studied); report it only as a sanity check. Holdout-2 (new pages) confirms.
+  studied); report it only as a sanity check. No holdout-2; bad real pages are added
+  as regression cases (bench README).
 
 ## Open question
 
