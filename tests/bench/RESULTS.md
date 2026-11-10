@@ -1,5 +1,51 @@
 # Benchmark results
 
+## 2026-11-10 (10) — cropped text regions (`Examples/crops/`)
+
+Five crops of text regions (240–426 px tall strips, 980–2114 px wide) cut
+from pages of the selection set, each with its own `.gt.txt`. 22 critical
+tokens in all: one token is 4.5 points, so critical-token differences
+here are mostly noise. Offline bench image, **Docker on an Apple M4 Pro,
+4 jobs** (not a Pi timing). Selected rows (all 14 variants run):
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr (v6 small det + eslav rec) | 7.2% | 63.5% | 62.8% | 81.8% | 89.5% | 1.6 | 279 MB |
+| v2, psm 6, best | 10.4% | 75.7% | 75.1% | 77.3% | 78.9% | 1.9 | 89 MB |
+| v2, psm 3, best | 12.0% | 75.7% | 74.7% | 72.7% | 73.7% | 1.8 | 89 MB |
+| v2, psm 6, fast | 8.1% | 78.6% | 77.3% | 59.1% | 68.4% | 1.2 | 80 MB |
+| **v2, psm 3, fast (service default)** | 8.9% | 75.7% | 74.7% | 50.0% | 57.9% | 1.2 | 80 MB |
+| v2, psm 4, fast | 8.9% | 75.7% | 74.7% | 50.0% | 57.9% | 1.2 | 80 MB |
+| baseline, psm 3, fast | 10.3% | 72.1% | 71.9% | 54.5% | 57.9% | 0.9 | 80 MB |
+
+Per image, default vs rapidocr (CER / recall / critical): image-1 1.2/94/80
+vs 6.1/64/100; image-2 3.7/89/17 vs 7.0/62/67; image-3 15.8/57/50 vs
+11.7/57/75; image-4 19.5/50/25 vs 7.8/58/75; image-5 0.9/95/100 vs
+4.9/79/100.
+
+- **psm 6 helps on crops** (one block of text): fast CER 8.9% → 8.1%,
+  recall +2.9, critical +9 points (2 tokens). On image-4, psm 3 splits
+  the strip into fragments ("20,10, 2026", "09.11.26"); psm 6 reads the
+  lines in order. On full pages psm 6 was clearly worse ((1)), so it
+  would only fit a "crop / text block" mode.
+- **best** reads more numbers (+22.7 points with psm 3) but its CER is
+  higher on crops (12.0% vs 8.9%).
+- **Default critical 50% is partly a ground-truth artefact.** image-2's
+  `.gt.txt` (and the main set's `image-2.gt.txt`) types the ICD codes with
+  mixed letters: `H66.1` and `H90.3` with Latin H, `( Н66.1` with
+  Cyrillic Н; the print looks the same. fast reads `(Н90.3)` with
+  Cyrillic Н, so a correct reading scores as wrong. fast's real misses
+  there are spaces inside codes: `H66. 1`, `Н66. 1`, `2, 0м`.
+- RapidOCR again leads on critical tokens and loses on word recall; the
+  Pi time gate closed it ((9)).
+
+Command:
+
+```bash
+docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
+  --preprocess baseline,v2 --psm 3,4,6 --dpi 0 --thresh 0 --model fast,best,rapidocr-v6-small --jobs 4
+```
+
 ## 2026-11-10 (9) — detector comparison: PP-OCRv5 mobile, PP-OCRv6 tiny, small
 
 Recognizer unchanged (eslav PP-OCRv5 mobile; PP-OCRv6 rec has no
