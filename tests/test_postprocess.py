@@ -37,6 +37,42 @@ class FixWordTests(unittest.TestCase):
         self.check({"2О24": "2024", "12.О5.2024": "12.05.2024", "l00": "100",
                     "3-го": "3-го", "5мг": "5мг"})
 
+    def test_icd10_in_text_gets_latin_letter(self):
+        cases = {
+            "( Н66.1)Хронічна": "( H66.1)Хронічна",
+            "2,0м(Н90.3)": "2,0м(H90.3)",
+            "діагноз К29.7, I10": "діагноз K29.7, I10",
+            "А09 В18.2 Е11 М54.5 О80 Р07.3 С50.9 Т14 Х59": "A09 B18.2 E11 M54.5 O80 P07.3 C50.9 T14 X59",
+        }
+        for text, expected in cases.items():
+            self.assertEqual(main.fix_icd10(text), expected, text)
+
+    def test_icd10_space_after_dot_is_joined(self):
+        cases = {
+            "(Н66. 1)": "(H66.1)",
+            "H66. 1 Хронічна": "H66.1 Хронічна",
+            "M54. 16": "M54.16",
+            "Т12. Дата": "T12. Дата",  # a bare code still gets a Latin letter
+        }
+        for text, expected in cases.items():
+            self.assertEqual(main.fix_icd10(text), expected, text)
+        self.assertEqual(postprocess_text("Діагноз: К29. 7, І10"), "Діагноз: K29.7, I10")
+
+    def test_postprocess_keeps_codes_latin_inside_cyrillic_words(self):
+        self.assertEqual(postprocess_text("отитом.( Н66. 1)Хронічна 2, 0м(Н90.3)"),
+                         "отитом.( H66.1)Хронічна 2, 0м(H90.3)")
+        tsv = "5\t1\t1\t1\t1\t1\t10\t5\t40\t20\t91.5\t0м(Н90.3)"
+        self.assertTrue(postprocess_tsv(tsv).endswith("\t0м(H90.3)"))
+
+    def test_icd10_fix_leaves_other_words(self):
+        for text in (
+            "Б12.1",  # not a look-alike letter
+            "Н6. 1", "Н666.1", "Н66.123",  # not a code's digits
+            "НК66.1", "ХН66", "Н66.1мг", "Н66а",  # part of a longer word
+            "12.03. 2024", "С5-С6", "ВІЛ", "Пацієнт", "в/ч А3215",
+        ):
+            self.assertEqual(main.fix_icd10(text), text, text)
+
     def test_tsv_fixes_word_text_only(self):
         tsv = ("level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
                "4\t1\t1\t1\t1\t0\t0\t0\t50\t20\t-1\t\n"

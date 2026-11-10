@@ -389,6 +389,7 @@
             <div class="seg">
               <label><input type="radio" name="mode" value="text" checked><span>Текст</span></label>
               <label><input type="radio" name="mode" value="table"><span>Таблиця</span></label>
+              <label><input type="radio" name="mode" value="block"><span>Фрагмент<small>частина сторінки</small></span></label>
             </div>
           </fieldset>
           <fieldset class="group">
@@ -657,6 +658,21 @@
     statusEl.className = 'status' + (kind ? ' ' + kind : '');
   }
 
+  // A cropped part of a page reads better as one block (mode=block, psm 6).
+  // Cropping switches Текст to Фрагмент; removing the crop or a new file
+  // switches it back, unless the user picked the mode themselves.
+  let autoBlock = false;
+  settingsForm.addEventListener('change', (e) => { if (e.target.name === 'mode') autoBlock = false; });
+  function followCrop(cropped) {
+    if (cropped && modeSel.value === 'text') {
+      modeSel.value = 'block';
+      autoBlock = true;
+    } else if (!cropped && autoBlock) {
+      if (modeSel.value === 'block') modeSel.value = 'text';
+      autoBlock = false;
+    }
+  }
+
   function pickFile(file) {
     if (activeController) return;
     if (!file || !file.type.startsWith('image/')) {
@@ -666,6 +682,7 @@
     if (cropDialog.open) cropDialog.close();
     selectedFile = file;
     savedCrop = null;
+    followCrop(false);
     if (preview.src) URL.revokeObjectURL(preview.src);
     preview.src = URL.createObjectURL(file);
     showSelection(file);
@@ -761,7 +778,9 @@
     cropDoneBtn.disabled = true;
     try {
       savedCrop = cropper.getData(true);
-      showSelection(await cropToFile());
+      const file = await cropToFile();
+      followCrop(file !== selectedFile);
+      showSelection(file);
       // The result on screen came from the old selection.
       if (!resultPanel.classList.contains('hidden')) resultPanel.classList.add('stale');
       cropDialog.close();

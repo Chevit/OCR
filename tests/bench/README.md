@@ -29,20 +29,48 @@ Real medical documents live in `Examples/` at the repository root, which
   `image-3.gt.txt`. Images without a `.gt.txt` are skipped.
 - Type exactly what is printed (spelling, case, punctuation, numbers).
   Whitespace and line breaks are not scored.
+- ICD-10 codes always get a **Latin** letter (`H66.1`, `K29.7`, `I10`),
+  even on a Ukrainian keyboard: print can't tell Н from H, and the scoring
+  compares characters. Check with
+  `grep -rnE '(^|[^[:alnum:]])[АВЕКМНОРСТХІ][0-9]{2}([^0-9]|$)' Examples --include='*.gt.txt'`
+  (no output = fine). Military unit numbers stay Cyrillic (`в/ч А3215`).
 - Redact with **white** boxes. Black bars break Tesseract's layout analysis
   and drop the text around them, which real uploads don't have.
 - Keep realistic dark surroundings (phone UI in screenshots, a desk around a
   photographed page): those are cases to measure.
 - Handwritten pages go in a separate folder, `Examples/handwritten/`.
 
-## Holdout
+## Sets
 
-Pick variants on `Examples/` (images 1–10) only. Images 11–19 go in
-`Examples/holdout/`; subfolders are not read by default. Run the holdout
-only for the final choice, to check it wasn't tuned to the first ten:
+The bench reads only the folders it is given (no subfolders).
+
+| Folder | What | Use |
+| --- | --- | --- |
+| `Examples/` | pages 1–10 | selection: pick variants here |
+| `Examples/crops/` | crops of pages 1–10 | selection for Фрагмент (`mode=block`) |
+| `Examples/holdout/` | pages 11–19 | seen (image-12 was studied): sanity check only |
+| `Examples/crops-2/` | crops of pages 11–19 | seen, sanity check only |
+| `Examples/holdout2/pages/` | new pages | holdout-2: run once for the final choice |
+| `Examples/holdout2/crops/` | crops of those new pages | holdout-2 for Фрагмент |
+
+Holdout-2 layout: a page and its crops share the page's number, crops get a
+letter, so several crops of one page stay apart:
+
+```
+Examples/holdout2/pages/image-20.jpeg   image-20.gt.txt
+Examples/holdout2/crops/image-20a.png   image-20a.gt.txt
+Examples/holdout2/crops/image-20b.png   image-20b.gt.txt
+```
+
+Number new pages from 20 on. Don't run holdout-2 while choosing; run it once
+for the decisions it is meant to settle (scaling fix, removing the baseline
+path, fast vs best for Фрагмент):
 
 ```bash
-python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 --thresh 0 --model fast
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/holdout2/pages \
+  --preprocess baseline,v2 --psm 3 --dpi 0 --thresh 0 --model fast,best --jobs 4
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/holdout2/crops \
+  --preprocess v2 --psm 3,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
 ```
 
 ## Reading results

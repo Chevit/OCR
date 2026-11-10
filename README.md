@@ -41,7 +41,7 @@ curl -X POST http://localhost:8000/ocr \
   -F "mode=text"
 ```
 
-`POST /ocr` accepts `mode=text|table`, `output=json|text|tsv|words`,
+`POST /ocr` accepts `mode=text|table|block`, `output=json|text|tsv|words`,
 `model=fast|best` (Tesseract's fast models, or the slower, usually more accurate
 tessdata_best ones from `TESSDATA_BEST_DIR`), and `max_megapixels` (overrides
 `TESSERACT_MAX_MEGAPIXELS`). The JSON response is `text`, `mode`, `model` (for
@@ -51,7 +51,11 @@ JSON with `tsv`, `image` (the prepared page as a JPEG data URL; TSV positions
 are in its pixels) and `seconds`.
 
 The mode selects Tesseract's page segmentation mode (`--psm`): `text` uses 3
-(automatic layout) and `table` uses 6 (one block read row by row). If table
+(automatic layout), `table` and `block` use 6 (one block read row by row).
+`block` (**Фрагмент** in the UI) is for a cropped part of a page: on crops
+psm 6 reads better than 3 (see `tests/bench/RESULTS.md`), on whole pages
+worse. The UI switches from Текст to Фрагмент when you crop the image and
+back when the crop is removed; you can change it either way. If table
 rows come out jumbled on your documents, 4 is worth trying in `TESSERACT_PSM`
 in `app/main.py`.
 
@@ -81,7 +85,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 | `OCR_CONCURRENCY` | `4` | recognitions running at once; extra requests wait their turn. Each Tesseract is limited to 1 CPU thread (`OMP_THREAD_LIMIT=1`) |
 | `PREPROCESS` | `v2` | image preparation: `v2` evens out shadows and uneven light and sizes the page so text is about 30 px high; `baseline` is the previous preparation (sizes by megapixels), kept for comparison |
-| `POSTPROCESS` | `0` | `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); applies to text and word-check output |
+| `POSTPROCESS` | `0` | `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); ICD-10 codes get a Latin letter also when glued to other text (`0м(Н90.3)` → `0м(H90.3)`) and lose a space after the dot (`H66. 1` → `H66.1`, plain-text output only); applies to text and word-check output |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
 ## Tests

@@ -84,6 +84,15 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   +27.3 s/image over fast (gate ≤ 5 s): recognition is ~95% of the time.
   **Second engine stays closed**; only a much faster recognizer (e.g.
   re-reading just uncertain number lines) could reopen it.
+- ICD-10 ground truth is Latin everywhere; POSTPROCESS fixes codes'
+  letters also inside words and joins "X00. 1" (RESULTS.md (12)): +3.2
+  points on crops, +0.2 on pages. POSTPROCESS stays off by default.
+- Фрагмент mode (`mode=block`, psm 6): the UI picks it after a crop and
+  goes back to Текст when the crop is removed. Crops: CER 11.9% → 9.8%,
+  critical 60.2% → 65.9%, same speed on the Pi. fast vs best for
+  fragments is decided on holdout-2.
+- Holdout-2 layout ready: `Examples/holdout2/pages`, `Examples/holdout2/crops`
+  (crops named after their page, `image-20a`).
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
   remove the baseline path; table TSV (step 5) not started.
 

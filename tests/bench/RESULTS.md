@@ -1,5 +1,52 @@
 # Benchmark results
 
+## 2026-11-10 (12) — ICD-10 ground truth in Latin, POSTPROCESS for codes
+
+**Ground truth**: ICD-10 codes always get a Latin letter now. 14 codes
+with a Cyrillic look-alike letter were changed in every `.gt.txt`:
+`Н66.1` (image-2 page and crop), `К60.5`, `К61.3`, `К64.1` (holdout and
+crops-2 image-16), and image-14 in crops-2. Military unit numbers
+(`в/ч А3215`) stay Cyrillic. Rule and a grep check are in the bench README.
+
+**POSTPROCESS** (`fix_icd10`, runs after the per-word fixes): a token that
+is a whole ICD-10 code gets a Latin letter for А/В/Е/К/М/Н/О/Р/С/Т/Х/І,
+also when glued to other text (`0м(Н90.3)`), and "X00. 1" becomes "X00.1".
+Before, a code inside a mostly Cyrillic word (`Н66.1)Хронічна`) was
+switched back to Cyrillic by the per-word fix; that is fixed. Unit tests
+cover the changes and words that must stay (`в/ч А3215`, `Б12.1`,
+`Н66.1мг`, `12.03. 2024`, `С5-С6`, ...).
+
+Re-scored, v2 fast, offline bench image, **Docker on an Apple M4 Pro, 4
+jobs** (scores are deterministic, Pi gives the same):
+
+| Set | Variant | CER pooled | Word recall | Critical (positional) | Critical, POSTPROCESS=1 | Critical, 2+ chars |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pages 1–10 | **psm 3 (default)** | 21.6% | 84.3% | 72.0% | 72.2% | 76.3% |
+| Pages 1–10 | psm 6 | 26.7% | 83.7% | 73.4% | 73.7% | 76.6% |
+| Crops (10) | psm 3 | 11.9% | 80.9% | 60.2% | 63.4% | 58.0% |
+| Crops (10) | **psm 6 (Фрагмент)** | 9.8% | 84.0% | 65.9% | 69.1% | 65.0% |
+| Holdout 11–19 (seen) | psm 3 (default) | 30.2% | 77.7% | 63.0% | 63.3% | 64.6% |
+| Holdout 11–19 (seen) | psm 6 | 31.5% | 81.9% | 67.5% | 67.8% | 68.4% |
+
+- The corrected ground truth moves the default on pages 72.2% → 72.0%
+  (fast reads image-2's `( Н66.1` with a Cyrillic letter, which now
+  counts as wrong) and leaves crops unchanged.
+- POSTPROCESS for codes: +3.2 points on crops (4 of 123 tokens: the
+  image-2 codes), +0.2–0.3 on pages and holdout. CER is unchanged
+  (±0.1).
+- psm 6 on whole pages: more critical tokens (+1.4 / +4.5 points) but
+  much worse CER (+5.1 / +1.3) and WER (reading order); the default for
+  pages stays psm 3, psm 6 only for Фрагмент.
+- crops-2 (crops of pages 11–19) was being filled while this ran (images
+  11–15 replaced, 16–19 still pages); its numbers aren't reported.
+
+Command (per set):
+
+```bash
+docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
+  --preprocess v2 --psm 3,6 --dpi 0 --thresh 0 --model fast --jobs 4
+```
+
 ## 2026-11-10 (11) — crops re-run with 10 crops
 
 `Examples/crops/` now has 10 crops (image-6 to image-10 added; image-1 to

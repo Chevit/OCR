@@ -33,8 +33,9 @@ OCR_SLOTS = asyncio.Semaphore(OCR_CONCURRENCY)
 TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_best")
 
 # Tesseract page segmentation mode per OCR mode: 3 = automatic layout,
-# 6 = one uniform block read row by row (keeps table rows together).
-TESSERACT_PSM = {"text": 3, "table": 6}
+# 6 = one uniform block read row by row (keeps table rows together; also
+# reads a cropped fragment better than 3, see tests/bench/RESULTS.md (11)).
+TESSERACT_PSM = {"text": 3, "table": 6, "block": 6}
 
 # Image preparation: "v2" evens out shadows and uneven light and sizes pages
 # by their text height; "baseline" (the old way) sizes them by megapixels.
@@ -44,8 +45,9 @@ if PREPROCESS not in ("baseline", "v2"):
     raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
 # Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
 TEXT_HEIGHT_PX = 30
-# 1 = fix Latin/Cyrillic look-alike letters inside words, and letters read
-# instead of digits in numbers, dates and ICD-10 codes.
+# 1 = fix Latin/Cyrillic look-alike letters inside words, letters read
+# instead of digits in numbers, dates and ICD-10 codes, and ICD-10 codes'
+# letter and spacing (fix_icd10).
 POSTPROCESS = os.environ.get("POSTPROCESS", "0") == "1"
 
 app = FastAPI(title="OCR service", version="1.0.0")
@@ -445,17 +447,35 @@ def fix_word(word: str) -> str:
     return lead + core + tail
 
 
+# An ICD-10 code anywhere in the text, also glued to other characters
+# ("2,0м(Н90.3)") and with a space after the dot ("H66. 1"). ICD-10 letters
+# are Latin; the Cyrillic look-alikes are mapped below.
+ICD10_IN_TEXT = re.compile(r"(?<!\w)([A-ZАВЕКМНОРСТХІ])(\d\d)(?:\.( ?)(\d{1,2}))?(?!\w|\. ?\d)")
+
+
+def fix_icd10(text: str) -> str:
+    """Latin letter for ICD-10 codes (Н66.1 -> H66.1) and no space after the
+    dot (X00. 1 -> X00.1). Only tokens that are a whole code change."""
+    def fix(m):
+        letter, number, _, decimals = m.groups()
+        return letter.translate(TO_LATIN) + number + ("." + decimals if decimals else "")
+    return ICD10_IN_TEXT.sub(fix, text)
+
+
 def postprocess_text(text: str) -> str:
-    return re.sub(r"\S+", lambda m: fix_word(m.group()), text)
+    # ICD-10 last: fix_word turns a mostly Cyrillic word's look-alikes Cyrillic,
+    # which would undo the code's Latin letter in "Н66.1)Хронічна".
+    return fix_icd10(re.sub(r"\S+", lambda m: fix_word(m.group()), text))
 
 
 def postprocess_tsv(tsv: str) -> str:
-    """fix_word on the text column of each word row; boxes and confidences stay."""
+    """fix_word and fix_icd10 on the text column of each word row; boxes and
+    confidences stay. Codes split over two words ("H66." "1") stay split."""
     rows = tsv.split("\n")
     for i, row in enumerate(rows):
         cells = row.split("\t")
         if len(cells) == 12 and cells[0] == "5":
-            cells[11] = fix_word(cells[11])
+            cells[11] = fix_icd10(fix_word(cells[11]))
             rows[i] = "\t".join(cells)
     return "\n".join(rows)
 
@@ -530,7 +550,7 @@ async def health():
 async def ocr(
     request: Request,
     file: UploadFile = File(...),
-    mode: Literal["text", "table"] = Form("text"),
+    mode: Literal["text", "table", "block"] = Form("text"),
     output: Literal["text", "json", "tsv", "words"] = Form("json"),
     max_megapixels: Optional[float] = Form(None),
     model: Literal["fast", "best"] = Form("fast"),
@@ -597,7 +617,7 @@ async def api_info():
         "service": "ocr-service",
         "endpoints": {
             "GET /": "web interface — upload an image, get copiable text",
-            "POST /ocr": "multipart form: file, mode=text|table, output=json|text|tsv|words, max_megapixels, model=fast|best",
+            "POST /ocr": "multipart form: file, mode=text|table|block, output=json|text|tsv|words, max_megapixels, model=fast|best",
             "GET /health": "checks that Tesseract runs and has every language in TESSERACT_LANGS",
         },
     }

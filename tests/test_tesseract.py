@@ -46,7 +46,7 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     def test_passes_languages_and_psm_per_mode(self):
-        for mode, psm in {"text": "3", "table": "6"}.items():
+        for mode, psm in {"text": "3", "table": "6", "block": "6"}.items():
             proc = fake_process(stdout="Привіт  \n\n\n\n\nHello\f".encode())
             with patch("app.main.asyncio.create_subprocess_exec", AsyncMock(return_value=proc)) as exec_:
                 response = self.post(mode=mode)
