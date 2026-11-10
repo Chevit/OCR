@@ -53,7 +53,7 @@ def prepare(raw, preprocess):
     return png, time.perf_counter() - started
 
 
-def tesseract(png, psm, dpi, thresholding, model):
+def tesseract(png, psm, dpi, thresholding, model, tsv=False):
     cmd = [
         app.TESSERACT_CMD, "stdin", "stdout",
         *(["--tessdata-dir", app.TESSDATA_BEST_DIR] if model == "best" else []),
@@ -61,6 +61,7 @@ def tesseract(png, psm, dpi, thresholding, model):
         *(["--dpi", str(dpi)] if dpi else []),
         "-c", "preserve_interword_spaces=1",
         "-c", f"thresholding_method={thresholding}",
+        *(["-c", "tessedit_create_tsv=1"] if tsv else []),
     ]
     started = time.perf_counter()
     out = subprocess.run(cmd, input=png, capture_output=True, env=app.TESSERACT_ENV, check=True)
@@ -176,6 +177,54 @@ def report(results, default):
         print(f"| {name} | " + " | ".join(cells) + " |")
 
 
+def tsv_text(tsv):
+    """Plain text from a Tesseract TSV: words joined per line."""
+    lines = {}
+    for c in (row.split("\t") for row in tsv.splitlines()):
+        if len(c) == 12 and c[0] == "5" and c[11].strip():
+            lines.setdefault(tuple(c[2:5]), []).append(c[11])
+    return "\n".join(" ".join(words) for words in lines.values())
+
+
+def adaptive_sweep(samples, preprocess, jobs, thresholds=(0, 50, 60, 65, 70, 75, 80, 85, 90, 101)):
+    """Experiment: read with the fast models; when their mean word confidence
+    is below a threshold, read again with the best models and keep the more
+    confident result. Both reads run once per page; every threshold is then
+    simulated from them. 0 = never rerun, 101 = always."""
+    with ThreadPoolExecutor(jobs) as pool:
+        prepared = list(pool.map(lambda smp: prepare(smp[1], preprocess), samples))
+        tasks = [(i, model) for i in range(len(samples)) for model in ("fast", "best")]
+        outs = dict(zip(tasks, pool.map(
+            lambda t: tesseract(prepared[t[0]][0], 3, 0, 0, t[1], tsv=True), tasks)))
+
+    rows, reruns = {}, {}
+    for t in thresholds:
+        name = "fast only" if t == 0 else "always both" if t > 100 else f"rerun if conf < {t}"
+        rows[name], reruns[name] = [], 0
+        for i, (sample, _, truth) in enumerate(samples):
+            (fast, fast_s), (best, best_s) = outs[i, "fast"], outs[i, "best"]
+            conf_fast, conf_best = app.mean_word_confidence(fast), app.mean_word_confidence(best)
+            seconds = prepared[i][1] + fast_s
+            tsv = fast
+            if conf_fast < t:
+                reruns[name] += 1
+                seconds += best_s
+                tsv = best if conf_best > conf_fast else fast
+            text = tsv_text(tsv)
+            rows[name].append((sample, score(truth, text), seconds,
+                               score(truth, app.postprocess_text(text))))
+    rows["best only"] = [
+        (sample, score(truth, tsv_text(outs[i, "best"][0])), prepared[i][1] + outs[i, "best"][1],
+         score(truth, app.postprocess_text(tsv_text(outs[i, "best"][0]))))
+        for i, (sample, _, truth) in enumerate(samples)
+    ]
+    table({f"{n} (reran {reruns[n]}/{len(samples)})" if n in reruns else n: r for n, r in rows.items()})
+    print("\n| Image | fast conf | best conf |\n| --- | --- | --- |")
+    for i, (sample, _, _) in enumerate(samples):
+        print(f"| {sample} | {app.mean_word_confidence(outs[i, 'fast'][0]):.1f} "
+              f"| {app.mean_word_confidence(outs[i, 'best'][0]):.1f} |")
+
+
 def machine():
     """Timings only compare on the same machine; the Pi is the one that counts."""
     try:
@@ -199,6 +248,9 @@ def main():
     p.add_argument("--dpi", default="0,300", help="0 = don't pass --dpi")
     p.add_argument("--thresh", default="0,2", help="thresholding_method: 0 Otsu, 2 Sauvola")
     p.add_argument("--model", default="fast,best")
+    p.add_argument("--adaptive", action="store_true",
+                   help="instead of the variant grid: sweep the fast-then-best rerun threshold "
+                        "(first --preprocess value, psm 3)")
     p.add_argument("--jobs", type=int, default=os.cpu_count(),
                    help="parallel tesseract runs; 1 gives the cleanest timings")
     a = p.parse_args()
@@ -206,9 +258,13 @@ def main():
     split = lambda s, f=str: [f(x) for x in s.split(",")]
     variants = list(itertools.product(split(a.preprocess), split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
-    if "best" in split(a.model) and not os.path.isdir(app.TESSDATA_BEST_DIR):
+    if ("best" in split(a.model) or a.adaptive) and not os.path.isdir(app.TESSDATA_BEST_DIR):
         sys.exit(f"model best needs {app.TESSDATA_BEST_DIR} (set TESSDATA_BEST_DIR)")
     samples = load_samples(a.dirs)
+    if a.adaptive:
+        print(f"{len(samples)} images, adaptive sweep, {split(a.preprocess)[0]}, psm 3; "
+              f"timings on {machine()}, {a.jobs} parallel jobs\n")
+        return adaptive_sweep(samples, split(a.preprocess)[0], a.jobs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
     report(run(samples, variants, a.jobs), default=(app.PREPROCESS, 3, 0, 0, "fast"))
