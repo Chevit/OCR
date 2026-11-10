@@ -73,6 +73,11 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   81.4%; psm 4 now beats psm 3 on critical tokens.
 - Hybrid re-read of critical tokens (Tesseract + PP-OCRv5 recognizer):
   +0.3 points positional, not adopted (branch `experiment/hybrid-reread`).
+- RapidOCR with the PP-OCRv5 mobile detector (RESULTS.md (8)), last
+  engine experiment: Mac 82.6% positional critical, 73.4% recall, +1.8
+  s/image over fast, 760 MB per job. Gate on the Pi: ≤ 5 s/image over
+  fast and ≤ 500 MB per job, else the second engine is closed. Pi run
+  pending.
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
   remove the baseline path; table TSV (step 5) not started.
 

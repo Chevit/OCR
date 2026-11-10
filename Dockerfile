@@ -45,4 +45,8 @@ ADD --chmod=644 --checksum=sha256:dc6bf0e855247decce214ba6dae5bc135fa0ad725a5918
     ${PADDLEOCR_ONNX}/languages/eslav/rec.onnx /opt/rapidocr/rec.onnx
 ADD --chmod=644 --checksum=sha256:3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb \
     ${PADDLEOCR_ONNX}/languages/eslav/dict.txt /opt/rapidocr/dict.txt
+# RapidOCR's own PP-OCRv5 mobile detector (URL and SHA-256 from rapidocr 3.10.0's default_models.yaml).
+ADD --chmod=644 --checksum=sha256:4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae \
+    https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx \
+    /opt/rapidocr/det_mobile.onnx
 ENV RAPIDOCR_MODELS_DIR=/opt/rapidocr

@@ -66,7 +66,8 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
   image has it; outside Docker, `pip install -r
   tests/bench/requirements-rapidocr.txt` and put the model files from the
   Dockerfile into `tests/bench/models/` (hashes are checked). Every run
-  prints the peak RAM of one job per model.
+  prints the peak RAM of one job per model. `rapidocr-mobile` is the same
+  with RapidOCR's PP-OCRv5 mobile detector.
 
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows

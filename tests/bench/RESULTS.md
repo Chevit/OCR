@@ -1,5 +1,49 @@
 # Benchmark results
 
+## 2026-11-10 (8) — RapidOCR with the PP-OCRv5 mobile detector
+
+Last engine experiment, timing first. `rapidocr-mobile` = RapidOCR's own
+PP-OCRv5 mobile detector (`ch_PP-OCRv5_det_mobile.onnx`, 4.6 MB, URL and
+SHA-256 from rapidocr 3.10.0's `default_models.yaml`, baked into the bench
+image) + the same eslav recognizer; otherwise the `rapidocr` settings (no
+memory arena, one onnxruntime thread per job, own process per job).
+
+**Gate** for the next step (line-level merge: Tesseract text, PP-OCR
+numbers): on the Pi, ≤ 5 s/image over fast and ≤ 500 MB per job.
+Otherwise the second engine is closed.
+
+Selection set, offline bench image, **Docker on an Apple M4 Pro, 4 jobs
+(not a Pi timing)**:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr-mobile | 19.4% | 73.4% | 70.1% | **82.6%** | **85.6%** | 4.7 | 760 MB |
+| v2, rapidocr (server det, from (7)) | 20.6% | 73.0% | 69.4% | 81.4% | 82.1% | 20.4 | 2.2 GB |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.8% | 72.2% | 76.6% | 2.9 | 140 MB |
+
+Per image (CER / recall / critical), fast vs rapidocr-mobile: image-1
+1.4/94/95 vs 5.2/74/95; image-10 5.1/93/77 vs 8.2/72/100; image-2
+6.1/88/91 vs 13.2/80/86; image-3 54.3/62/25 vs 48.5/52/100; image-4
+43.3/81/84 vs 39.6/69/59; image-5 18.8/84/50 vs 10.4/75/70; image-6
+44.1/89/92 vs 49.7/75/92; image-8 8.6/89/76 vs 9.8/77/92; image-9
+52.8/59/29 vs 33.7/67/51.
+
+- The mobile detector reads at least as well as the server one (+1.2
+  points positional, +3.5 on 2+ chars) at 4x less time on the Mac.
+- RAM: 760 MB per job on the Mac, over the 500 MB gate. The Pi measured
+  the server detector lower than the Mac (1.9 vs 2.2 GB), so the Pi run
+  decides.
+- Time: +1.8 s/image over fast on the Mac. The server detector was 7x
+  fast on the Mac and 11x on the Pi; at that ratio the mobile detector
+  lands near +6–7 s on the Pi, around the 5 s gate.
+
+Pi run (in the `OCR` folder, after `git pull`):
+
+```bash
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \
+  --preprocess v2 --psm 3 --dpi 0 --thresh 0 --model fast,rapidocr-mobile --jobs 4
+```
+
 ## 2026-11-10 (7) — positional critical tokens, all variants re-scored
 
 The critical-token count was order-free: a page counted a date as read if

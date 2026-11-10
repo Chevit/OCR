@@ -61,9 +61,9 @@ JOBS = 1
 
 
 def tesseract(png, psm, dpi, thresholding, model, tsv=False):
-    if model == "rapidocr":  # experiment, see rapid.py; psm/dpi/thresh don't apply
+    if model.startswith("rapidocr"):  # experiment, see rapid.py; psm/dpi/thresh don't apply
         from tests.bench import rapid
-        text, seconds, rss = rapid.read(png, JOBS)
+        text, seconds, rss = rapid.read(png, JOBS, model)
         PEAK_RSS[model] = max(PEAK_RSS[model], rss)
         return text, seconds
     cmd = [
@@ -176,6 +176,8 @@ def label(variant):
     preprocess, psm, dpi, thresholding, model = variant
     if model == "rapidocr":
         return f"{preprocess}, rapidocr (PP-OCRv5 det + eslav rec)"
+    if model == "rapidocr-mobile":
+        return f"{preprocess}, rapidocr-mobile (PP-OCRv5 mobile det + eslav rec)"
     return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
@@ -357,7 +359,7 @@ def main():
     variants = list(itertools.product(split(a.preprocess), split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
     # RapidOCR ignores psm/dpi/thresh: one run per preprocess value is enough.
-    variants = sorted({v[:1] + (0, 0, 0) + v[4:] if v[4] == "rapidocr" else v for v in variants})
+    variants = sorted({v[:1] + (0, 0, 0) + v[4:] if v[4].startswith("rapidocr") else v for v in variants})
     global JOBS
     JOBS = a.jobs
     if ("best" in split(a.model) or a.adaptive) and not os.path.isdir(app.TESSDATA_BEST_DIR):

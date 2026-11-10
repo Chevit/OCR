@@ -5,6 +5,8 @@ page Tesseract gets. Bench only; the service doesn't use it.
     docker compose run --build --rm bench python -m tests.bench.bench Examples \
         --preprocess v2 --psm 3 --dpi 0 --thresh 0 --model fast,best,rapidocr --jobs 4
 
+"rapidocr-mobile" is the same with RapidOCR's PP-OCRv5 mobile detector.
+
 Runs fully offline. The bench image has the model files baked in
 (Dockerfile, pinned by SHA-256) and no network. Outside Docker, put them in
 tests/bench/models/ (git-ignored) or point RAPIDOCR_MODELS_DIR at them; the
@@ -32,7 +34,12 @@ MODELS = {
     "det.onnx": "61824840edf6e74581898930b8091b1b2318f4b2705a2e8a40ad3de7ac480133",  # detection/v5
     "rec.onnx": "dc6bf0e855247decce214ba6dae5bc135fa0ad725a5918a7fcfb59fad6c9cdee",  # languages/eslav
     "dict.txt": "3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb",  # languages/eslav
+    # RapidOCR's own PP-OCRv5 mobile detector, the URL and SHA-256 listed in
+    # rapidocr 3.10.0's default_models.yaml (ModelScope RapidAI/RapidOCR, v3.10.0).
+    "det_mobile.onnx": "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae",
 }
+# Bench model name -> detector file; both use the eslav recognizer.
+DETECTORS = {"rapidocr": "det.onnx", "rapidocr-mobile": "det_mobile.onnx"}
 
 
 def sha256(path):
@@ -55,7 +62,7 @@ def check_models():
 _engine = None
 
 
-def _init():
+def _init(det):
     global _engine
     from rapidocr import RapidOCR
     from rapidocr.utils.download_file import DownloadFile
@@ -74,7 +81,7 @@ def _init():
         "Global.log_level": "error",
         "EngineConfig.onnxruntime.intra_op_num_threads": 1,
         "EngineConfig.onnxruntime.inter_op_num_threads": 1,
-        "Det.model_path": m("det.onnx"),
+        "Det.model_path": m(det),
         "Rec.model_path": m("rec.onnx"),
         "Rec.rec_keys_path": m("dict.txt"),
     })
@@ -89,17 +96,16 @@ def _read(png):
     return "\n".join(out.txts or ()), seconds, rss
 
 
-_pool = None
+_pools = {}  # bench model name -> its process pool
 _pool_lock = threading.Lock()  # the bench calls read() from several threads at once
 
 
-def read(png, jobs):
+def read(png, jobs, model="rapidocr"):
     """Text of a prepared page, seconds, and the peak RSS of the job's process."""
-    global _pool
     with _pool_lock:
-        if _pool is None:
+        if model not in _pools:
             check_models()
             # spawn, not fork: the bench's threads are running (fork is Linux's default).
-            _pool = ProcessPoolExecutor(jobs, multiprocessing.get_context("spawn"),
-                                        initializer=_init)
-    return _pool.submit(_read, png).result()
+            _pools[model] = ProcessPoolExecutor(jobs, multiprocessing.get_context("spawn"),
+                                                initializer=_init, initargs=(DETECTORS[model],))
+    return _pools[model].submit(_read, png).result()
