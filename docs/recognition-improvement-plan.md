@@ -52,8 +52,9 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   of critical tokens for 1.6–2.1x time); dropping low-confidence words and
   tiny blocks (F1 up, but critical tokens down; word check already marks
   those words).
-- Waiting on the Pi run: if psm 4 + best ≤ 15 s/image at `--jobs 4`, it
-  becomes the default.
+- Pi 5 timings (4 jobs): fast psm 3 9.1 s/image, psm 4 + best 24.6 s/image,
+  over the 15 s limit, so fast psm 3 stays the default; best stays a UI
+  choice (+4.2 points of critical tokens).
 - Next: fix the line-pitch misread (image-12), verify on new pages, then
   remove the baseline path; table TSV (step 5) not started.
 

@@ -1,6 +1,6 @@
 # Benchmark results
 
-## 2026-11-10 (3) — noise filter, holdout, running on the Pi
+## 2026-11-10 (3) — noise filter, holdout, Pi timings
 
 ### Running the bench on the Pi
 
@@ -33,10 +33,38 @@ names the machine; on the Pi it reads `Raspberry Pi 5 ...`.
 `--jobs 4`, it becomes the default (`model=best`, psm 4 for text mode).
 Otherwise fast psm 3 stays.
 
-| Variant | s/image, Pi 5, 4 jobs |
-| --- | --- |
-| v2, psm 3, fast | not run yet |
-| v2, psm 4, best | not run yet |
+Raspberry Pi 5 Model B Rev 1.1, 4 parallel jobs, service image (Tesseract
+5.5.0), selection set:
+
+| Variant | CER pooled | CER median | Word recall | Word F1 | Critical tokens | s/image |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 3, best | 21.8% | 21.3% | 84.6% | 78.8% | 81.4% | 24.6 |
+| **v2, psm 3, fast (service default)** | 22.2% | 22.6% | 83.8% | 78.0% | 78.9% | 9.1 |
+| v2, psm 4, best | 22.2% | 24.4% | 84.5% | 79.1% | 83.1% | 24.6 |
+| v2, psm 4, fast | 22.8% | 24.6% | 83.5% | 78.5% | 77.9% | 9.4 |
+
+Adaptive sweep on the Pi (psm 3, same set):
+
+| Variant | CER pooled | Critical tokens | Pages rerun | s/image |
+| --- | --- | --- | --- | --- |
+| fast only | 22.2% | 78.9% | 0/9 | 10.0 |
+| rerun if conf < 65 | 22.0% | 79.2% | 1/9 | 10.6 |
+| rerun if conf < 70 / 75 | 22.0% | 79.4% | 2/9 | 12.4 |
+| rerun if conf < 80 | 22.0% | 79.4% | 4/9 | 18.0 |
+| rerun if conf < 90 | 22.0% | 80.1% | 7/9 | 23.3 |
+| always both | 21.9% | 80.4% | 9/9 | 25.6 |
+| best only | 21.8% | 81.4% | — | 19.7 |
+
+(best only: 19.7 s here vs 24.6 s in the grid run; each run has a different
+mix of jobs sharing the CPU at once, so compare timings within one run.)
+
+- **Decision: fast psm 3 stays the default.** psm 4 + best takes 24.6
+  s/image, over the 15 s limit, for +4.2 points of critical tokens; best is
+  2.7x slower than fast on the Pi (1.7x on the M4 Pro).
+- Adaptive: no threshold pays off on the Pi either; at most +0.5 points of
+  critical tokens for 1.2x the time (conf < 70).
+- `model=best` stays a choice in the UI for pages where numbers matter more
+  than waiting.
 
 ### Dropping noise words (not adopted)
 
