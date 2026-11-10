@@ -77,6 +77,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_MAX_MEGAPIXELS` | `8` | largest image size sent to Tesseract |
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 | `OCR_CONCURRENCY` | `4` | recognitions running at once; extra requests wait their turn. Each Tesseract is limited to 1 CPU thread (`OMP_THREAD_LIMIT=1`) |
+| `PREPROCESS` | `baseline` | image preparation: `baseline`, or `v2`, which also evens out shadows and uneven light and sizes the page so text is about 30 px high (instead of by megapixels) |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
 ## Tests

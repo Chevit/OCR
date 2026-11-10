@@ -9,7 +9,7 @@ from typing import Literal, Optional
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageOps, ImageStat
+from PIL import Image, ImageFilter, ImageMath, ImageOps, ImageStat
 
 # --- Configuration (all overridable via environment variables) ----------
 
@@ -35,6 +35,14 @@ TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_bes
 # Tesseract page segmentation mode per OCR mode: 3 = automatic layout,
 # 6 = one uniform block read row by row (keeps table rows together).
 TESSERACT_PSM = {"text": 3, "table": 6}
+
+# Image preparation: "baseline" sizes pages by megapixels; "v2" also evens
+# out shadows and uneven light and sizes pages by their text height.
+PREPROCESS = os.environ.get("PREPROCESS", "baseline")
+if PREPROCESS not in ("baseline", "v2"):
+    raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
+# Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
+TEXT_HEIGHT_PX = 30
 
 app = FastAPI(title="OCR service", version="1.0.0")
 
@@ -105,8 +113,9 @@ def find_skew_angle(img: Image.Image) -> float:
     return max((best + step / 10 for step in range(-5, 6)), key=score)
 
 
-def straighten(img: Image.Image) -> Image.Image:
-    angle = find_skew_angle(img)
+def straighten(img: Image.Image, angle: Optional[float] = None) -> Image.Image:
+    if angle is None:
+        angle = find_skew_angle(img)
     if abs(angle) < 0.3:  # not worth resampling the image
         return img
     return img.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
@@ -119,9 +128,67 @@ def turn_upright(image_png: bytes, clockwise: int) -> bytes:
     return to_png(straighten(img))
 
 
-def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
+def flatten_background(img: Image.Image) -> Image.Image:
+    """Even out shadows and uneven light in a photo. A max filter on a small
+    copy erases the (darker) text and leaves the page background with its
+    lighting; dividing by it leaves the text on even white."""
+    small = img.copy()
+    small.thumbnail((512, 512), Image.BOX)
+    background = (
+        small.filter(ImageFilter.MaxFilter(15))
+        .filter(ImageFilter.GaussianBlur(5))
+        .resize(img.size, Image.BILINEAR)
+        .point(lambda v: max(v, 1))  # no division by zero
+    )
+    return ImageMath.lambda_eval(
+        lambda a: a["convert"](a["float"](a["page"]) * 255 / a["bg"], "L"),
+        page=img, bg=background,
+    )
+
+
+def line_pitch(img: Image.Image, angle: float) -> Optional[float]:
+    """Distance between text lines in img's pixels, from the period of the
+    ink-per-row profile of a ~1500 px copy levelled by the skew angle.
+    None when no clear period stands out (little text, pictures)."""
+    copy = img.copy()
+    copy.thumbnail((1500, 1500), Image.BOX)
+    ink = copy.point(lambda p: 255 if p < 128 else 0)
+    ink = ink.rotate(angle, resample=Image.BILINEAR, expand=True, fillcolor=0)
+    rows = ink.resize((1, ink.height), Image.BOX).tobytes()
+    mean = sum(rows) / len(rows)
+    rows = [v - mean for v in rows]
+
+    def corr(lag: int) -> float:
+        return sum(a * b for a, b in zip(rows, rows[lag:]))
+
+    energy = corr(0)
+    lags = range(6, len(rows) // 3)
+    if not energy or not lags:
+        return None
+    # ponytail: O(rows x lags) pure-Python autocorrelation, ~0.1 s on a 1500 px
+    # copy; switch to an FFT if bigger copies are ever needed.
+    ac = {lag: corr(lag) for lag in lags}
+    # Only peaks count: a slow trend (a dark table around the page) makes the
+    # correlation fall steadily from the shortest lag without being a period.
+    peaks = [l for l in lags[1:-1] if ac[l - 1] < ac[l] >= ac[l + 1]]
+    if not peaks:
+        return None
+    pitch = max(peaks, key=ac.get)
+    # A multiple of the real pitch (e.g. two lines) peaks too; prefer the
+    # half when it is nearly as strong.
+    half = pitch // 2
+    if half in ac and max(ac.get(half - 1, 0), ac[half], ac.get(half + 1, 0)) > 0.8 * ac[pitch]:
+        pitch = max((half - 1, half, half + 1), key=lambda l: ac.get(l, 0))
+    if ac[pitch] < 0.25 * energy:
+        return None
+    return pitch * img.width / copy.width
+
+
+def prepare_for_tesseract(
+    raw: bytes, max_megapixels: float, preprocess: Optional[str] = None
+) -> bytes:
     """Clean up an image for Tesseract: upright, grayscale, high contrast, and
-    at a resolution close to a 300 DPI scan."""
+    at a resolution close to a 300 DPI scan (v2: text about 30 px high)."""
     img = ImageOps.exif_transpose(open_image(raw))  # phone photos are often rotated
 
     # Converting straight to grayscale turns transparent pixels black, which
@@ -136,6 +203,11 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
     if ImageStat.Stat(img).mean[0] < 128:
         img = ImageOps.invert(img)
 
+    v2 = (preprocess or PREPROCESS) == "v2"
+    angle = None
+    if v2:
+        img = ImageOps.autocontrast(flatten_background(img))
+
     width, height = img.size
     megapixels = (width * height) / 1_000_000
     # Small images (e.g. photos compressed by a messenger) have text too small
@@ -147,11 +219,20 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
         scale = min(2.0, (target / megapixels) ** 0.5)
     else:
         scale = 1.0
+    if v2:
+        angle = find_skew_angle(img)
+        pitch = line_pitch(img, angle)
+        if pitch:
+            # Lines are ~1.5-2x the glyph height. Scale to the target height,
+            # at most 2x up and within max_megapixels; at most 2x down, so a
+            # pitch misread as two lines can't shrink text out of reach.
+            scale = min(2.0, (max_megapixels / megapixels) ** 0.5,
+                        max(0.5, TEXT_HEIGHT_PX / (pitch / 1.75)))
     if scale != 1.0:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)
 
-    return to_png(straighten(img))
+    return to_png(straighten(img, angle))
 
 
 async def detect_rotation(image_png: bytes) -> int:

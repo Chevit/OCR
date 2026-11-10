@@ -43,10 +43,10 @@ def load_samples(dirs):
     return samples
 
 
-def prepare(raw):
+def prepare(raw, preprocess):
     """The service's preparation; returns the PNG Tesseract reads and the seconds it took."""
     started = time.perf_counter()
-    png = app.prepare_for_tesseract(raw, app.TESSERACT_MAX_MEGAPIXELS)
+    png = app.prepare_for_tesseract(raw, app.TESSERACT_MAX_MEGAPIXELS, preprocess)
     rotation = asyncio.run(app.detect_rotation(png))
     if rotation:
         png = app.turn_upright(png, rotation)
@@ -76,19 +76,20 @@ def errors(truth, text):
 
 def run(samples, variants, jobs):
     with ThreadPoolExecutor(jobs) as pool:
-        prepared = list(pool.map(lambda s: prepare(s[1]), samples))
+        keys = sorted({(v[0], i) for v in variants for i in range(len(samples))})
+        prepared = dict(zip(keys, pool.map(lambda k: prepare(samples[k[1]][1], k[0]), keys)))
         tasks = [(v, i) for v in variants for i in range(len(samples))]
-        outputs = pool.map(lambda t: tesseract(prepared[t[1]][0], *t[0]), tasks)
+        outputs = pool.map(lambda t: tesseract(prepared[t[0][0], t[1]][0], *t[0][1:]), tasks)
         results = {}  # variant -> list of (sample name, errors, seconds)
         for (v, i), (text, seconds) in zip(tasks, outputs):
             name, _, truth = samples[i]
-            results.setdefault(v, []).append((name, errors(truth, text), seconds + prepared[i][1]))
+            results.setdefault(v, []).append((name, errors(truth, text), seconds + prepared[v[0], i][1]))
     return results
 
 
 def label(variant):
-    psm, dpi, thresholding, model = variant
-    return f"psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
+    preprocess, psm, dpi, thresholding, model = variant
+    return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
 def cer(row):
@@ -140,6 +141,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("dirs", nargs="*", default=["Examples"],
                    help="folders with images and .gt.txt files (subfolders are not read)")
+    p.add_argument("--preprocess", default="baseline,v2")
     p.add_argument("--psm", default="3,4,6")
     p.add_argument("--dpi", default="0,300", help="0 = don't pass --dpi")
     p.add_argument("--thresh", default="0,2", help="thresholding_method: 0 Otsu, 2 Sauvola")
@@ -149,14 +151,14 @@ def main():
     a = p.parse_args()
 
     split = lambda s, f=str: [f(x) for x in s.split(",")]
-    variants = list(itertools.product(split(a.psm, int), split(a.dpi, int),
+    variants = list(itertools.product(split(a.preprocess), split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
     if "best" in split(a.model) and not os.path.isdir(app.TESSDATA_BEST_DIR):
         sys.exit(f"model best needs {app.TESSDATA_BEST_DIR} (set TESSDATA_BEST_DIR)")
     samples = load_samples(a.dirs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
-    report(run(samples, variants, a.jobs), baseline=(3, 0, 0, "fast"))
+    report(run(samples, variants, a.jobs), baseline=("baseline", 3, 0, 0, "fast"))
 
 
 if __name__ == "__main__":

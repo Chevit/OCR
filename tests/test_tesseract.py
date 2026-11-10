@@ -143,6 +143,44 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertEqual(find_skew_angle(page), 0)
         self.assertEqual(find_skew_angle(Image.new("L", (400, 300), 255)), 0)
 
+    def test_v2_finds_line_pitch_of_tilted_rows(self):
+        from app.main import line_pitch
+
+        page = Image.new("L", (2000, 1500), 255)
+        draw = ImageDraw.Draw(page)
+        for y in range(100, 1400, 70):  # text lines every 70 px
+            draw.rectangle((150, y, 1850, y + 30), fill=0)
+        tilted = page.rotate(-3, resample=Image.BICUBIC, fillcolor=255)
+
+        self.assertAlmostEqual(line_pitch(tilted, 3), 70, delta=2)
+        self.assertIsNone(line_pitch(Image.new("L", (800, 600), 255), 0))
+
+    def test_v2_evens_out_shadows(self):
+        from app.main import flatten_background
+
+        light = Image.linear_gradient("L").resize((1200, 900)).point(lambda v: 90 + v * 165 // 255)
+        page = light.copy()
+        ImageDraw.Draw(page).rectangle((100, 400, 1100, 420), fill=20)  # a line of text
+        flat = flatten_background(page)
+
+        lo, hi = flat.crop((0, 0, 1200, 300)).getextrema()  # background only
+        self.assertGreater(lo, 230)  # dark corner lifted to near white
+        self.assertLess(flat.getpixel((600, 410)), 80)  # text stays dark
+
+    def test_v2_scales_text_to_target_height(self):
+        from app.main import prepare_for_tesseract
+
+        page = Image.new("L", (2400, 1800), 255)  # 4.3 MP: baseline keeps the size
+        draw = ImageDraw.Draw(page)
+        for y in range(100, 1700, 105):  # pitch 105 -> glyphs ~60 px -> half size
+            draw.rectangle((150, y, 2250, y + 55), fill=0)
+        buf = io.BytesIO()
+        page.save(buf, format="PNG")
+
+        size = lambda pp: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8, pp))).size
+        self.assertEqual(size("baseline"), (2400, 1800))
+        self.assertAlmostEqual(size("v2")[0], 1200, delta=40)
+
     def test_orientation_check_trusts_only_confident_answers(self):
         def osd(stdout, returncode=0):
             proc = fake_process(stdout=stdout, returncode=returncode)

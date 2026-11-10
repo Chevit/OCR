@@ -33,7 +33,7 @@ Pick variants on `Examples/` (images 1–10) only. Images 11–19 go in
 only for the final choice, to check it wasn't tuned to the first ten:
 
 ```bash
-python -m tests.bench.bench Examples/holdout --psm 4 --dpi 300 --thresh 0 --model fast
+python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 --thresh 0 --model fast
 ```
 
 ## Reading results
