@@ -81,7 +81,8 @@ def run(samples, variants, jobs):
         results = {}  # variant -> list of (sample name, errors, seconds)
         for (v, i), (text, seconds) in zip(tasks, outputs):
             name, _, truth = samples[i]
-            results.setdefault(v, []).append((name, errors(truth, text), seconds + prepared[v[0], i][1]))
+            results.setdefault(v, []).append((name, errors(truth, text), seconds + prepared[v[0], i][1],
+                                              errors(truth, app.postprocess_text(text))))
     return results
 
 
@@ -101,16 +102,17 @@ def report(results, baseline):
     def totals(rows):
         ce, c, we, w = (sum(r[1][k] for r in rows) for k in range(4))
         per_image = [cer(r) for r in rows]
+        post = sum(r[3][0] for r in rows) / c
         return (ce / c, statistics.mean(per_image), statistics.median(per_image),
-                we / w, sum(r[2] for r in rows) / len(rows))
+                we / w, post, sum(r[2] for r in rows) / len(rows))
 
-    print("| Variant | CER pooled | CER mean | CER median | WER pooled | s/image |")
-    print("| --- | --- | --- | --- | --- | --- |")
+    print("| Variant | CER pooled | CER mean | CER median | WER pooled | CER pooled, POSTPROCESS=1 | s/image |")
+    print("| --- | --- | --- | --- | --- | --- | --- |")
     ranked = sorted(results, key=lambda v: totals(results[v])[0])
     for v in ranked:
         mark = " (baseline)" if v == baseline else ""
-        cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:4])
-        print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[4]:.1f} |")
+        cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:5])
+        print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[5]:.1f} |")
 
     # Per image, the current service settings against the overall winner.
     best = ranked[0]

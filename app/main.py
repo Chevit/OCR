@@ -43,6 +43,9 @@ if PREPROCESS not in ("baseline", "v2"):
     raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
 # Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
 TEXT_HEIGHT_PX = 30
+# 1 = fix Latin/Cyrillic look-alike letters inside words, and letters read
+# instead of digits in numbers, dates and ICD-10 codes.
+POSTPROCESS = os.environ.get("POSTPROCESS", "0") == "1"
 
 app = FastAPI(title="OCR service", version="1.0.0")
 
@@ -367,6 +370,63 @@ async def run_tesseract(
     return out
 
 
+# Latin and Cyrillic letters that look the same, in matching order.
+LATIN_LOOKALIKES = "aceiopxyïACEHIKMOPTXB"
+CYRILLIC_LOOKALIKES = "асеіорхуїАСЕНІКМОРТХВ"
+TO_CYRILLIC = str.maketrans(LATIN_LOOKALIKES, CYRILLIC_LOOKALIKES)
+TO_LATIN = str.maketrans(CYRILLIC_LOOKALIKES, LATIN_LOOKALIKES)
+# Letters read in place of digits: O/o (Latin and Cyrillic) = 0, З/з = 3, l/I/І/| = 1.
+TO_DIGITS = str.maketrans("OoОоЗзlIІ|", "0000331111")
+DIGIT_LOOKALIKES = "OoОоЗзlIІ|"
+ICD10 = re.compile(r"([A-ZА-ЯІЇЄҐ])([0-9%s]{2})(\.[0-9%s]{1,2})?" % ((DIGIT_LOOKALIKES,) * 2))
+
+
+def fix_word(word: str) -> str:
+    """Repair one OCR word: an ICD-10 code gets a Latin letter and digits; a
+    number or date gets digits for look-alike letters (only when real digits
+    outnumber them, so "O2" and "CO2" stay); otherwise look-alike letters are
+    switched to the script that the word's unambiguous letters are mostly
+    in, or to Latin when there are none but there are digits (СO2 -> CO2)."""
+    lead, core, tail = re.fullmatch(r"(\W*)(.*?)(\W*)", word).groups()
+    digits = sum(c.isdigit() for c in core)
+
+    lookalikes = sum(c in DIGIT_LOOKALIKES for c in core)
+    icd = ICD10.fullmatch(core)
+    if icd and digits > sum(c in DIGIT_LOOKALIKES for c in core[1:]):
+        letter = icd.group(1).translate(TO_LATIN)
+        if letter.isascii():
+            return lead + letter + core[1:].translate(TO_DIGITS) + tail
+
+    others = sum(c.isalpha() and c not in DIGIT_LOOKALIKES for c in core)
+    if digits and not others and digits > lookalikes:
+        return lead + core.translate(TO_DIGITS) + tail
+
+    cyrillic = sum("\u0400" <= c <= "\u04ff" and c not in CYRILLIC_LOOKALIKES for c in core)
+    latin = sum(c.isalpha() and c.isascii() and c not in LATIN_LOOKALIKES for c in core)
+    # No unambiguous letters but digits (CO2, B12 with a Cyrillic С or В):
+    # formulas and codes are written in Latin.
+    if cyrillic > latin:
+        core = core.translate(TO_CYRILLIC)
+    elif latin > cyrillic or digits:
+        core = core.translate(TO_LATIN)
+    return lead + core + tail
+
+
+def postprocess_text(text: str) -> str:
+    return re.sub(r"\S+", lambda m: fix_word(m.group()), text)
+
+
+def postprocess_tsv(tsv: str) -> str:
+    """fix_word on the text column of each word row; boxes and confidences stay."""
+    rows = tsv.split("\n")
+    for i, row in enumerate(rows):
+        cells = row.split("\t")
+        if len(cells) == 12 and cells[0] == "5":
+            cells[11] = fix_word(cells[11])
+            rows[i] = "\t".join(cells)
+    return "\n".join(rows)
+
+
 def clean_tesseract_text(text: str) -> str:
     """Drop form feeds and trailing spaces; keep at most two blank lines in a row."""
     lines = [line.rstrip() for line in text.replace("\f", "").splitlines()]
@@ -470,6 +530,8 @@ async def ocr(
         tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer, model),
     )
     result = out.decode("utf-8", errors="replace")
+    if POSTPROCESS:
+        result = postprocess_tsv(result) if renderer else postprocess_text(result)
     if output == "words":
         # TSV word boxes are in the prepared page's pixels, so the page
         # comes along: the UI shows it and draws boxes on it as-is.

@@ -79,6 +79,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 | `OCR_CONCURRENCY` | `4` | recognitions running at once; extra requests wait their turn. Each Tesseract is limited to 1 CPU thread (`OMP_THREAD_LIMIT=1`) |
 | `PREPROCESS` | `baseline` | image preparation: `baseline`, or `v2`, which also evens out shadows and uneven light and sizes the page so text is about 30 px high (instead of by megapixels) |
+| `POSTPROCESS` | `0` | `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); applies to text and word-check output |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
 ## Tests
