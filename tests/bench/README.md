@@ -11,13 +11,13 @@ TESSDATA_BEST_DIR=~/tessdata_best python -m tests.bench.bench   # include model=
 python -m tests.bench.bench --psm 4 --model fast                # fewer variants
 ```
 
-On the Pi, run it inside the service image (bench dependencies stay out of
-the production `requirements.txt`); the exact commands are in
-[RESULTS.md](RESULTS.md), "Running the bench on the Pi":
+On the Pi (or anywhere with Docker), run it in the `bench` image: the
+service image plus the bench packages and RapidOCR models, with no network
+(`network_mode: none`), so documents can't leave the machine. Bench
+dependencies stay out of the production `requirements.txt` and image.
 
 ```bash
-sudo docker compose run --build --rm -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
-  sh -c "pip install -q -r tests/bench/requirements.txt && python -m tests.bench.bench Examples --jobs 4 ..."
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples --jobs 4 ...
 ```
 
 ## Data: `Examples/` (never committed)
@@ -57,10 +57,11 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
 - `--noise` replaces it with a sweep of dropping words below a confidence
   and tiny isolated blocks before output.
 - `--model ...,rapidocr` adds RapidOCR (PP-OCRv5 det + eslav rec) on the
-  same prepared page, an experiment the service doesn't use. Needs
-  `pip install -r tests/bench/requirements-rapidocr.txt`; model files are
-  downloaded into `tests/bench/models/` and checked by SHA-256 (see
-  `rapid.py`). Every run prints the peak RAM of one job per model.
+  same prepared page, an experiment the service doesn't use. The `bench`
+  image has it; outside Docker, `pip install -r
+  tests/bench/requirements-rapidocr.txt` and put the model files from the
+  Dockerfile into `tests/bench/models/` (hashes are checked). Every run
+  prints the peak RAM of one job per model.
 
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows

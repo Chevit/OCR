@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.6
-FROM python:3.11-slim
+FROM python:3.11-slim AS service
 
 WORKDIR /app
 
@@ -30,3 +30,19 @@ COPY static ./static
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --- Recognition benchmark (docker compose run bench ...), never deployed ---
+# Bench dependencies and the RapidOCR experiment's models, baked in so the
+# bench runs with no network at all (compose sets network_mode: none).
+FROM service AS bench
+COPY tests/bench/requirements.txt tests/bench/requirements-rapidocr.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements.txt -r /tmp/requirements-rapidocr.txt
+# monkt/paddleocr-onnx at a pinned commit, checked by SHA-256 (rapid.py checks again).
+ARG PADDLEOCR_ONNX=https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65
+ADD --chmod=644 --checksum=sha256:61824840edf6e74581898930b8091b1b2318f4b2705a2e8a40ad3de7ac480133 \
+    ${PADDLEOCR_ONNX}/detection/v5/det.onnx /opt/rapidocr/det.onnx
+ADD --chmod=644 --checksum=sha256:dc6bf0e855247decce214ba6dae5bc135fa0ad725a5918a7fcfb59fad6c9cdee \
+    ${PADDLEOCR_ONNX}/languages/eslav/rec.onnx /opt/rapidocr/rec.onnx
+ADD --chmod=644 --checksum=sha256:3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb \
+    ${PADDLEOCR_ONNX}/languages/eslav/dict.txt /opt/rapidocr/dict.txt
+ENV RAPIDOCR_MODELS_DIR=/opt/rapidocr

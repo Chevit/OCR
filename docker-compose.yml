@@ -1,9 +1,23 @@
 services:
   ocr:
-    build: .
+    build:
+      context: .
+      target: service
     container_name: ocr-service
     restart: unless-stopped
     # environment:
     #   API_TOKEN: "set-a-secret-here"   # uncomment to require a bearer token
     ports:
       - '8000:8000'
+
+  # Recognition benchmark, offline: docker compose run --build --rm bench python -m tests.bench.bench ...
+  # (see tests/bench/RESULTS.md). Never started by "up".
+  bench:
+    build:
+      context: .
+      target: bench
+    profiles: [bench]
+    network_mode: none
+    volumes:
+      - ./tests:/app/tests
+      - ./Examples:/app/Examples

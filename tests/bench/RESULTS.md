@@ -105,17 +105,21 @@ Per image (CER / recall / critical), fast vs rapidocr:
 - **Cost**: 4.3x fast's time on the Mac; peak RAM 2.3–3.6 GB per job
   (varies between runs), 20–30x Tesseract's. Four jobs would need ~10–14
   GB, more than a Pi 5 has, so it couldn't run at `OCR_CONCURRENCY=4` as is.
-- Pi timings pending (the Pi isn't reachable from the bench machine). Run,
-  in the `OCR` folder on the Pi (downloads ~96 MB of models into
-  `tests/bench/models/` on first run):
+- **Offline**: the `bench` compose service has the models and bench
+  packages baked into its image (Dockerfile stage `bench`, models pinned by
+  SHA-256) and runs with `network_mode: none`, so nothing can be uploaded
+  and nothing is fetched at run time. RapidOCR gets explicit paths for every
+  file; its downloader (the only network code in rapidocr) is blocked, so a
+  missing file fails loudly. Checked in Docker on the Mac (aarch64, service
+  image's Tesseract 5.5.0, 4 jobs): name lookup fails, only loopback is up,
+  and the bench passes with RapidOCR numbers identical to the native run
+  (20.7% / 72.8% / 90.3%, 21.0 s/image, 2.2 GB per job; fast 22.0% /
+  83.8% / 78.4%, 2.9 s).
+- Pi timings pending. In the `OCR` folder on the Pi, after `git pull`:
 
 ```bash
-sudo docker compose run --build --rm -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
-  -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
-  sh -c "pip install -q --root-user-action=ignore -r tests/bench/requirements.txt \
-      -r tests/bench/requirements-rapidocr.txt && \
-    python -m tests.bench.bench Examples --preprocess v2 --psm 3 --dpi 0 --thresh 0 \
-      --model fast,best,rapidocr --jobs 4"
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \
+  --preprocess v2 --psm 3 --dpi 0 --thresh 0 --model fast,best,rapidocr --jobs 4
 ```
 
   If the Pi runs out of memory at 4 jobs (container killed, exit 137),
