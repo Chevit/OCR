@@ -1,5 +1,127 @@
 # Benchmark results
 
+## 2026-11-10 (4) — scaling fix, image-17, RapidOCR experiment
+
+### Scaling fix (image-12)
+
+Text-height scaling may now shrink a page only when it is over
+`TESSERACT_MAX_MEGAPIXELS`; otherwise the scale is never below the
+megapixel (baseline) scale. A pitch misread as a multiple of the line
+spacing can no longer shrink the page. Unit test: a synthetic page whose
+row profile peaks at 4x the real pitch.
+
+Pages whose scale changed: image-12 (622×816 → 1792×2355) and image-3
+(1312×984 → 2309×1732, also shrunk before). Every other page is prepared
+exactly as before.
+
+Selection set (images 1–6, 8–10), Apple M4 Pro, 12 jobs:
+
+| Variant | CER pooled | CER median | Word recall | Word F1 | Critical tokens | s/image |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 3, best | 21.7% | 21.3% | 84.4% | 78.8% | 81.1% | 6.3 |
+| **v2, psm 3, fast (service default)** | 22.0% | 22.9% | 83.8% | 78.4% | 78.4% | 3.6 |
+| v2, psm 4, best | 22.0% | 25.2% | 84.7% | 79.4% | 83.4% | 5.7 |
+| v2, psm 4, fast | 22.1% | 25.0% | 83.7% | 78.6% | 78.2% | 3.7 |
+| baseline, psm 3, fast | 34.8% | 39.5% | 69.7% | 71.2% | 68.7% | 3.6 |
+
+- v2 fast: CER 22.2% → 22.0%, recall 83.7% → 83.8%, critical tokens
+  78.9% → 78.4%. The critical drop is image-3 alone: 3 of its 4 tokens → 1
+  of 4 with fast (best reads all 4), while its CER improves 63.3% → 53.3%
+  and recall 58% → 62%. Baseline rows are unchanged (the fix is v2 only).
+
+Old holdout (images 11–19), **seen — sanity check only**: image-12 was
+studied to find this failure, so these numbers can't confirm the fix.
+Confirmation waits for holdout-2.
+
+| Variant | CER pooled | CER median | Word recall | Word F1 | Critical tokens |
+| --- | --- | --- | --- | --- | --- |
+| v2, psm 3, best | 30.1% | 25.6% | 78.9% | 76.2% | 71.1% |
+| **v2, psm 3, fast** | 30.3% | 25.9% | 77.6% | 75.0% | 71.4% |
+| v2, psm 4, fast | 31.1% | 26.5% | 78.8% | 74.7% | 74.8% |
+| baseline, psm 3, fast | 38.4% | 33.5% | 67.4% | 70.4% | 66.4% |
+
+- image-12 (v2 fast): 74.6% / 15% / 10% → 42.6% / 73% / 71% (CER /
+  recall / critical); baseline had 42.7% / 71% / 71%.
+- image-19 reads 25.9% / 76% / 66% now vs 24.3% / 80% / 68% in (3), with
+  an identical prepared page (same size, run twice, same result). Its
+  `.gt.txt` was saved at 14:10, close to the 14:15 holdout commit, so the
+  earlier run likely used an older text. Not caused by the fix.
+
+### image-17: why baseline reads nothing (report only, not fixed)
+
+Not rotation (OSD: 0°, confidence 2.7), not inversion (mean gray 176, under
+the 128 threshold only when dark). It is **the white fill from
+straightening**:
+
+- The photo is dim: after autocontrast the paper is gray (~177), text ~85–130.
+- Baseline levels a 1.5° tilt and fills the uncovered corners with pure
+  white (`fillcolor=255`): 5.3% of the page becomes 255.
+- Tesseract's Otsu then splits "gray paper vs white wedges" (threshold
+  212), not ink vs paper: the whole sheet turns black, layout analysis
+  calls it one picture, and no text lines are found.
+- Same page and tilt, only the fill changed: white 0 words, paper-gray
+  (177) 202 words, not straightened 165 words.
+- v2 escapes it because shadow evening makes the paper white (mean 243),
+  so the white fill blends in. `turn_upright` uses the same white fill,
+  harmless after v2 for the same reason. Matters only while the baseline
+  path exists; a fill of the page's median gray would fix it there.
+
+### RapidOCR + PP-OCRv5 (experiment, bench only)
+
+`tests/bench/rapid.py`: RapidOCR 3.10.0, onnxruntime 1.31.1, models from
+monkt/paddleocr-onnx at commit 7b02d0a (pinned by SHA-256): PP-OCRv5 det
+(the repo has only the **server** detector, 88 MB) + eslav PP-OCRv5 mobile
+rec. Same v2 preparation and orientation check; RapidOCR's own defaults
+after that (it resizes to ≤ 2000 px), no angle classifier, one onnxruntime
+thread per job, each job its own process.
+
+Selection set, **Apple M4 Pro, 4 jobs (no Pi run yet)**:
+
+| Variant | CER pooled | CER median | Word recall | Word precision | Word F1 | Critical tokens | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr | 20.7% | 16.4% | 72.8% | 66.1% | 69.3% | **90.3%** | 11.6 | 2.3–3.6 GB |
+| v2, psm 3, best | 21.7% | 21.3% | 84.4% | 73.8% | 78.8% | 81.1% | 4.8 | 0.2 GB |
+| v2, psm 3, fast | 22.0% | 22.9% | 83.8% | 73.7% | 78.4% | 78.4% | 2.7 | 0.1 GB |
+
+Per image (CER / recall / critical), fast vs rapidocr:
+
+| Image | fast | rapidocr |
+| --- | --- | --- |
+| image-1 | 1.7% / 94% / 95% | 5.2% / 74% / 95% |
+| image-10 | 5.3% / 93% / 73% | 8.4% / 70% / 96% |
+| image-2 | 6.2% / 88% / 91% | 15.6% / 77% / 91% |
+| image-3 | 53.3% / 62% / 25% | 55.0% / 54% / 75% |
+| image-4 | 42.7% / 81% / 90% | 40.1% / 70% / 80% |
+| image-5 | 22.9% / 80% / 60% | 16.4% / 76% / 80% |
+| image-6 | 44.3% / 88% / 100% | 48.4% / 81% / 100% |
+| image-8 | 8.5% / 89% / 78% | 8.7% / 77% / 97% |
+| image-9 | 53.6% / 59% / 63% | 39.2% / 62% / 69% |
+
+- **Critical tokens +12 points** over fast (+9 over best): numbers, dates
+  and codes read much better (image-8, 208 tokens: 78% → 97%).
+- **Word recall −11 points**: the eslav recognizer writes Russian и/й/э
+  where Ukrainian has і/ї/є ("ликарську", "Украйни", "Довидка"), so many
+  words miss by one letter. CER barely notices; word search would.
+- **Cost**: 4.3x fast's time on the Mac; peak RAM 2.3–3.6 GB per job
+  (varies between runs), 20–30x Tesseract's. Four jobs would need ~10–14
+  GB, more than a Pi 5 has, so it couldn't run at `OCR_CONCURRENCY=4` as is.
+- Pi timings pending (the Pi isn't reachable from the bench machine). Run,
+  in the `OCR` folder on the Pi (downloads ~96 MB of models into
+  `tests/bench/models/` on first run):
+
+```bash
+sudo docker compose run --build --rm -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+  -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
+  sh -c "pip install -q --root-user-action=ignore -r tests/bench/requirements.txt \
+      -r tests/bench/requirements-rapidocr.txt && \
+    python -m tests.bench.bench Examples --preprocess v2 --psm 3 --dpi 0 --thresh 0 \
+      --model fast,best,rapidocr --jobs 4"
+```
+
+  If the Pi runs out of memory at 4 jobs (container killed, exit 137),
+  that is itself the answer for the service; `--jobs 2` then still gives
+  per-image times and RAM.
+
 ## 2026-11-10 (3) — noise filter, holdout, Pi timings
 
 ### Running the bench on the Pi

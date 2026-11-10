@@ -56,6 +56,11 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
   rerun with best when mean word confidence is below T".
 - `--noise` replaces it with a sweep of dropping words below a confidence
   and tiny isolated blocks before output.
+- `--model ...,rapidocr` adds RapidOCR (PP-OCRv5 det + eslav rec) on the
+  same prepared page, an experiment the service doesn't use. Needs
+  `pip install -r tests/bench/requirements-rapidocr.txt`; model files are
+  downloaded into `tests/bench/models/` and checked by SHA-256 (see
+  `rapid.py`). Every run prints the peak RAM of one job per model.
 
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows

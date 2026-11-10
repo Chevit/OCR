@@ -228,10 +228,13 @@ def prepare_for_tesseract(
         pitch = line_pitch(img, angle)
         if pitch:
             # Lines are ~1.5-2x the glyph height. Scale to the target height,
-            # at most 2x up and within max_megapixels; at most 2x down, so a
-            # pitch misread as two lines can't shrink text out of reach.
+            # at most 2x up and within max_megapixels. A pitch misread as a
+            # multiple of the line spacing asks for a shrink, so text height
+            # may only shrink pages over max_megapixels (at most 2x); smaller
+            # pages never get below the megapixel scale.
+            floor = 0.5 if megapixels > max_megapixels else scale
             scale = min(2.0, (max_megapixels / megapixels) ** 0.5,
-                        max(0.5, TEXT_HEIGHT_PX / (pitch / 1.75)))
+                        max(floor, TEXT_HEIGHT_PX / (pitch / 1.75)))
     if scale != 1.0:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)

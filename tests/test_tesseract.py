@@ -193,9 +193,32 @@ class TesseractEngineTests(unittest.TestCase):
         buf = io.BytesIO()
         page.save(buf, format="PNG")
 
-        size = lambda pp: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8, pp))).size
+        size = lambda pp, mp=8: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), mp, pp))).size
         self.assertEqual(size("baseline"), (2400, 1800))
-        self.assertAlmostEqual(size("v2")[0], 1200, delta=40)
+        # Under max_megapixels text height never shrinks the page...
+        self.assertEqual(size("v2"), (2400, 1800))
+        # ...over it, it may shrink below the megapixel cap (0.68x here).
+        self.assertAlmostEqual(size("v2", 2)[0], 1200, delta=40)
+
+    def test_v2_misread_pitch_harmonic_does_not_shrink_the_page(self):
+        # Every 4th line is a full dark line, the rest short and faint: the
+        # row profile peaks at 4x the real 26 px pitch (image-12 in the
+        # holdout read 114 px instead of 25.6 px and was shrunk to 0.5x).
+        from app.main import line_pitch, prepare_for_tesseract
+
+        page = Image.new("L", (1200, 1600), 255)  # 1.9 MP: baseline enlarges it
+        draw = ImageDraw.Draw(page)
+        for i, y in enumerate(range(80, 1520, 26)):
+            if i % 4 == 0:
+                draw.rectangle((100, y, 1100, y + 14), fill=0)
+            else:
+                draw.rectangle((100, y + 5, 400, y + 9), fill=0)
+        self.assertGreater(line_pitch(page, 0), 2 * 26)  # the case this guards
+        buf = io.BytesIO()
+        page.save(buf, format="PNG")
+
+        size = lambda pp: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8, pp))).size
+        self.assertGreaterEqual(size("v2")[0], size("baseline")[0])
 
     def test_orientation_check_trusts_only_confident_answers(self):
         def osd(stdout, returncode=0):

@@ -21,6 +21,7 @@ import re
 import statistics
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -53,7 +54,17 @@ def prepare(raw, preprocess):
     return png, time.perf_counter() - started
 
 
+# Peak RSS (bytes) of one job, per model: what one parallel run needs.
+PEAK_RSS = collections.defaultdict(int)
+JOBS = 1
+
+
 def tesseract(png, psm, dpi, thresholding, model, tsv=False):
+    if model == "rapidocr":  # experiment, see rapid.py; psm/dpi/thresh don't apply
+        from tests.bench import rapid
+        text, seconds, rss = rapid.read(png, JOBS)
+        PEAK_RSS[model] = max(PEAK_RSS[model], rss)
+        return text, seconds
     cmd = [
         app.TESSERACT_CMD, "stdin", "stdout",
         *(["--tessdata-dir", app.TESSDATA_BEST_DIR] if model == "best" else []),
@@ -64,8 +75,23 @@ def tesseract(png, psm, dpi, thresholding, model, tsv=False):
         *(["-c", "tessedit_create_tsv=1"] if tsv else []),
     ]
     started = time.perf_counter()
-    out = subprocess.run(cmd, input=png, capture_output=True, env=app.TESSERACT_ENV, check=True)
-    return out.stdout.decode("utf-8", errors="replace"), time.perf_counter() - started
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, env=app.TESSERACT_ENV)
+    out = []
+    reader = threading.Thread(target=lambda: out.append(proc.stdout.read()))
+    reader.start()
+    proc.stdin.write(png)
+    proc.stdin.close()
+    reader.join()
+    # wait4 instead of wait: it also returns the child's peak RSS.
+    _, status, usage = os.wait4(proc.pid, 0)
+    proc.returncode = os.waitstatus_to_exitcode(status)
+    seconds = time.perf_counter() - started
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+    rss = usage.ru_maxrss * (1 if sys.platform == "darwin" else 1024)  # bytes / KiB
+    PEAK_RSS[model] = max(PEAK_RSS[model], rss)
+    return out[0].decode("utf-8", errors="replace"), seconds
 
 
 CRITICAL = app.CRITICAL  # dates, ICD-10 codes, dosages, numbers
@@ -109,6 +135,8 @@ def run(samples, variants, jobs):
 
 def label(variant):
     preprocess, psm, dpi, thresholding, model = variant
+    if model == "rapidocr":
+        return f"{preprocess}, rapidocr (PP-OCRv5 det + eslav rec)"
     return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
@@ -283,6 +311,10 @@ def main():
     split = lambda s, f=str: [f(x) for x in s.split(",")]
     variants = list(itertools.product(split(a.preprocess), split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
+    # RapidOCR ignores psm/dpi/thresh: one run per preprocess value is enough.
+    variants = sorted({v[:1] + (0, 0, 0) + v[4:] if v[4] == "rapidocr" else v for v in variants})
+    global JOBS
+    JOBS = a.jobs
     if ("best" in split(a.model) or a.adaptive) and not os.path.isdir(app.TESSDATA_BEST_DIR):
         sys.exit(f"model best needs {app.TESSDATA_BEST_DIR} (set TESSDATA_BEST_DIR)")
     samples = load_samples(a.dirs)
@@ -297,6 +329,8 @@ def main():
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
     report(run(samples, variants, a.jobs), default=(app.PREPROCESS, 3, 0, 0, "fast"))
+    print("\nRAM peak per job: " + ", ".join(
+        f"{m} {rss / 2**20:.0f} MB" for m, rss in sorted(PEAK_RSS.items())))
 
 
 if __name__ == "__main__":

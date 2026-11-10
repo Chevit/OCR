@@ -55,8 +55,18 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - Pi 5 timings (4 jobs): fast psm 3 9.1 s/image, psm 4 + best 24.6 s/image,
   over the 15 s limit, so fast psm 3 stays the default; best stays a UI
   choice (+4.2 points of critical tokens).
-- Next: fix the line-pitch misread (image-12), verify on new pages, then
-  remove the baseline path; table TSV (step 5) not started.
+- Line-pitch misread fixed structurally (2026-11-10 (4)): text height may
+  shrink a page only above `TESSERACT_MAX_MEGAPIXELS`, otherwise never
+  below the megapixel scale. Old holdout is now seen (sanity check only:
+  image-12 recovers, v2 fast critical 62.2% → 71.4% vs baseline 66.4%).
+- image-17 (baseline 0%): straightening fills corners white on a gray
+  photographed page, Tesseract's Otsu then blacks out the whole sheet. v2
+  doesn't hit it. Not fixed (baseline path only).
+- RapidOCR + PP-OCRv5 (bench only, Mac): critical tokens 90.3% vs 78.4%,
+  word recall 72.8% vs 83.8% (и for і), 4.3x the time, 2.3–3.6 GB RAM per
+  job. Pi run pending.
+- Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
+  remove the baseline path; RapidOCR Pi run; table TSV (step 5) not started.
 
 ## Findings so far
 
@@ -71,7 +81,8 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - `Examples/image-N.jpeg` + `Examples/image-N.gt.txt` (UTF-8, exactly what is printed, whitespace and line breaks not scored).
 - Redact with paper-coloured (or white) boxes, never black. Keep realistic dark surroundings (phone UI, desks) — those are cases to measure.
 - Handwritten pages in a separate folder.
-- Selection set: `Examples/` (images 1–10; image-7 still has no ground truth). Holdout: `Examples/holdout/` (11–19), reported only for a final choice.
+- Selection set: `Examples/` (images 1–10; image-7 still has no ground truth). Old holdout `Examples/holdout/` (11–19) is now seen (image-12 was
+  studied); report it only as a sanity check. Holdout-2 (new pages) confirms.
 
 ## Open question
 
