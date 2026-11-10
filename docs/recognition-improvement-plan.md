@@ -59,9 +59,11 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   shrink a page only above `TESSERACT_MAX_MEGAPIXELS`, otherwise never
   below the megapixel scale. Old holdout is now seen (sanity check only:
   image-12 recovers, v2 fast critical 62.2% → 71.4% vs baseline 66.4%).
-- image-17 (baseline 0%): straightening fills corners white on a gray
-  photographed page, Tesseract's Otsu then blacks out the whole sheet. v2
-  doesn't hit it. Not fixed (baseline path only).
+- image-17 (baseline 0%): straightening filled corners white on a gray
+  photographed page, Tesseract's Otsu then blacked out the whole sheet.
+  Fixed: corners get the page's 90th-percentile gray (0 → 1435 characters).
+  v2 critical tokens unchanged; baseline loses image-9 tokens (accepted,
+  baseline path goes after holdout-2).
 - RapidOCR + PP-OCRv5 (bench only, offline image): critical tokens 90.3%
   vs 78.4%, word recall 72.8% vs 83.8% (и for і); on the Pi 116.5 s/image
   vs 10.3 for fast, 1.9 GB RAM per job. Not adopted.

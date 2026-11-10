@@ -1,5 +1,40 @@
 # Benchmark results
 
+## 2026-11-10 (5) — straightening fills corners with paper gray (image-17 fixed)
+
+`straighten()` (used by both paths and by `turn_upright`) now fills the
+uncovered corners with the page's 90th-percentile gray instead of 255; see
+"image-17: why baseline reads nothing" below. image-17 baseline: 0 → 1435
+characters read. Tests: a tilted gray page gets gray corners; real
+Tesseract on image-17 (local only, `Examples/` is git-ignored). Synthetic
+gray pages didn't reproduce the blackout, so that test uses the real page.
+
+Local Mac, psm 3, dpi -, thresh 0, fast, 4 jobs; old → new:
+
+| Set / path | CER pooled | Critical tokens |
+| --- | --- | --- |
+| Selection 1–10, v2 (default) | 22.0% → 21.6% | 78.4% → 78.4% |
+| Selection 1–10, baseline | 34.8% → 33.7% | 68.7% → 67.0% |
+| Old holdout 11–19, v2 | 30.3% → 30.3% | 71.4% → 71.4% |
+| Old holdout 11–19, baseline | 38.4% → 34.9% | 66.4% → 67.2% |
+
+v2 pages that changed (flattened paper is ~243–255, not exactly 255, so the
+fill moves a little). Critical tokens are unchanged on every page:
+
+| Image | Char errors | Words found |
+| --- | --- | --- |
+| image-5 | 388 → 325 | 176 → 185 |
+| image-9 | 1118 → 1118 | 173 → 174 |
+| image-10 | 104 → 108 (+4) | 248 → 248 |
+| image-17 | 888 → 889 (+1) | 122 → 122 |
+
+image-1, 2, 3, 4, 6, 8: identical.
+
+Known and accepted: baseline on the selection set loses 1.7 points of
+critical tokens, almost all from image-9 (30 → 23 of 51, while its CER
+improves 55.9% → 49.3%); image-3 and image-6 lose one each, image-8 gains
+two. Not investigated: the baseline path is due for removal after holdout-2.
+
 ## 2026-11-10 (4) — scaling fix, image-17, RapidOCR experiment
 
 ### Scaling fix (image-12)
@@ -47,7 +82,7 @@ Confirmation waits for holdout-2.
   `.gt.txt` was saved at 14:10, close to the 14:15 holdout commit, so the
   earlier run likely used an older text. Not caused by the fix.
 
-### image-17: why baseline reads nothing (report only, not fixed)
+### image-17: why baseline reads nothing (fixed in (5) above)
 
 Not rotation (OSD: 0°, confidence 2.7), not inversion (mean gray 176, under
 the 128 threshold only when dark). It is **the white fill from

@@ -55,5 +55,20 @@ class UpsideDownCheckTests(unittest.TestCase):
         reads.assert_not_awaited()
 
 
+class StraightenFillTests(unittest.TestCase):
+    def test_corners_get_the_paper_gray_not_white(self):
+        page = Image.new("L", (800, 600), 150)  # dim photographed paper
+        page.paste(30, (100, 100, 700, 130))  # a text line
+        page.paste(255, (10, 10, 40, 40))  # a glare spot
+        turned = main.straighten(page, angle=5)
+        self.assertGreater(turned.size[0], page.size[0])  # corners were added
+        self.assertLessEqual(abs(turned.getpixel((0, 0)) - 150), 3)
+        self.assertLessEqual(abs(turned.getpixel((turned.width - 1, turned.height - 1)) - 150), 3)
+
+    def test_white_page_keeps_white_corners(self):
+        turned = main.straighten(Image.new("L", (400, 300), 255), angle=5)
+        self.assertEqual(turned.getpixel((0, 0)), 255)
+
+
 if __name__ == "__main__":
     unittest.main()

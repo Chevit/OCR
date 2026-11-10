@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock, Mock, patch
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw, ImageFont
 
-from app.main import app, clean_tesseract_text, detect_rotation, find_skew_angle
+from app.main import (app, clean_tesseract_text, detect_rotation, find_skew_angle,
+                      prepare_for_tesseract)
 
 
 def png_bytes(size=(200, 100), mode="RGB", color="white"):
@@ -251,6 +252,7 @@ CYRILLIC_FONTS = [
     "/Library/Fonts/Arial Unicode.ttf",
 ]
 FONT = next((f for f in CYRILLIC_FONTS if os.path.exists(f)), None)
+IMAGE_17 = os.path.join(os.path.dirname(__file__), "..", "Examples", "holdout", "image-17.jpeg")
 
 
 @unittest.skipUnless(_has_ukr() and FONT, "needs tesseract with 'ukr' and a Cyrillic font")
@@ -272,6 +274,17 @@ class TesseractIntegrationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn("Привіт", response.json()["text"])
         self.assertIn("Діагноз", response.json()["text"])
+
+    @unittest.skipUnless(os.path.exists(IMAGE_17), "needs the private bench page Examples/holdout/image-17.jpeg")
+    def test_tilted_gray_page_is_not_blacked_out(self):
+        # White corners from straightening this gray photographed page made
+        # Tesseract's Otsu threshold black out the whole sheet (0 characters).
+        # Synthetic gray pages didn't reproduce it, so this uses the real page.
+        with open(IMAGE_17, "rb") as f:
+            png = prepare_for_tesseract(f.read(), 4.0, "baseline")
+        out = subprocess.run(["tesseract", "stdin", "stdout", "-l", "ukr+eng", "--psm", "3"],
+                             input=png, capture_output=True, check=True).stdout.decode()
+        self.assertGreater(len(out.strip()), 500)
 
 
 if __name__ == "__main__":

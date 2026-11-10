@@ -125,7 +125,23 @@ def straighten(img: Image.Image, angle: Optional[float] = None) -> Image.Image:
         angle = find_skew_angle(img)
     if abs(angle) < 0.3:  # not worth resampling the image
         return img
-    return img.rotate(angle, resample=Image.BICUBIC, expand=True, fillcolor=255)
+    # Fill the new corners with the paper's gray, not white: white corners on
+    # a gray photographed page make Tesseract's Otsu threshold black out the
+    # whole sheet (image-17). The 90th percentile is the paper, not the text
+    # or dark surroundings; on a flattened (v2) page it is about white.
+    return img.rotate(angle, resample=Image.BICUBIC, expand=True,
+                      fillcolor=paper_level(img))
+
+
+def paper_level(img: Image.Image) -> int:
+    """90th-percentile gray of a grayscale image."""
+    hist = img.histogram()
+    count, needed = 0, 0.9 * sum(hist)
+    for level, n in enumerate(hist):
+        count += n
+        if count >= needed:
+            return level
+    return 255
 
 
 def turn_upright(image_png: bytes, clockwise: int) -> bytes:
