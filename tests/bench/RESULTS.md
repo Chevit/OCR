@@ -1,6 +1,114 @@
 # Benchmark results
 
-## 2026-11-10 — selection set, white redaction (baseline + all variants)
+## 2026-11-10 (2) — v2 default, new metrics, adaptive model, image-6/10
+
+Same selection set (9 pages), Apple M4 Pro, 12 parallel jobs. **No Pi
+timings yet** (pending, see below).
+
+- **v2 is now the service default** (psm 3, fast); the baseline path stays
+  until the holdout confirms.
+- **New metrics**: word precision and F1 (beside recall = "words found"), and
+  **critical tokens**: dates, ICD-10 codes, dosages (мг/мл/г/од) and other
+  numbers from the ground truth, share read exactly.
+
+### Main variants with the new metrics
+
+| Variant | CER pooled | CER mean | CER median | WER | Word recall | Word precision | Word F1 | Critical tokens | Critical, POSTPROCESS=1 | CER, POSTPROCESS=1 | s/image |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 3, dpi -, thresh 0, best | 21.8% | 26.4% | 21.3% | 42.9% | 84.4% | 73.7% | 78.7% | 81.1% | 81.4% | 21.8% | 6.0 |
+| v2, psm 4, dpi -, thresh 0, best | 22.1% | 27.4% | 25.2% | 41.7% | 84.8% | 74.8% | 79.4% | 83.4% | 83.6% | 22.1% | 5.9 |
+| v2, psm 3, dpi -, thresh 0, fast (service default) | 22.2% | 27.6% | 22.9% | 45.1% | 83.7% | 73.5% | 78.2% | 78.9% | 79.2% | 22.2% | 3.5 |
+| v2, psm 4, dpi -, thresh 0, fast | 22.3% | 28.3% | 25.0% | 42.9% | 83.7% | 74.1% | 78.6% | 78.9% | 79.2% | 22.3% | 3.3 |
+| baseline, psm 4, dpi -, thresh 0, best | 33.1% | 38.9% | 38.5% | 49.1% | 72.3% | 74.1% | 73.2% | 79.2% | 79.4% | 33.1% | 4.8 |
+| baseline, psm 4, dpi -, thresh 0, fast | 33.1% | 38.7% | 38.1% | 50.5% | 71.8% | 73.6% | 72.7% | 73.9% | 74.2% | 33.1% | 3.2 |
+| baseline, psm 3, dpi -, thresh 0, best | 34.7% | 39.6% | 39.5% | 49.3% | 70.9% | 74.0% | 72.4% | 75.7% | 75.9% | 34.7% | 5.0 |
+| baseline, psm 3, dpi -, thresh 0, fast | 34.8% | 39.3% | 39.5% | 51.0% | 69.7% | 72.7% | 71.2% | 68.7% | 69.0% | 34.8% | 3.2 |
+
+| Image | v2, psm 3, dpi -, thresh 0, fast: CER / recall / critical | v2, psm 3, dpi -, thresh 0, best: CER / recall / critical |
+| --- | --- | --- |
+| image-1 | 1.7% / 94% / 95% | 1.4% / 94% / 95% |
+| image-10 | 5.3% / 93% / 73% | 5.9% / 93% / 85% |
+| image-2 | 6.3% / 87% / 91% | 7.1% / 88% / 95% |
+| image-3 | 63.3% / 58% / 75% | 53.1% / 75% / 100% |
+| image-4 | 42.7% / 81% / 90% | 42.5% / 81% / 90% |
+| image-5 | 22.9% / 80% / 60% | 21.3% / 81% / 70% |
+| image-6 | 44.3% / 88% / 100% | 44.4% / 91% / 100% |
+| image-8 | 8.5% / 89% / 78% | 8.3% / 89% / 80% |
+| image-9 | 53.6% / 59% / 63% | 53.2% / 60% / 59% |
+
+- **Critical tokens: v2 fast 78.9% vs baseline 68.7%.** `best` models help
+  here more than CER shows: psm 4 + best 83.4%, psm 3 + best 81.1%, at ~1.7x
+  the time. **POSTPROCESS=1 adds only ~0.3 points**: OCR mistakes in these
+  tokens are mostly digits misread as other digits, not look-alike letters.
+- **Word precision ~74% everywhere**: outputs carry ~35% extra words
+  (stamps, signatures, noise). Recall is what v2 improves.
+
+### Adaptive model (fast, rerun with best when mean word confidence < T)
+
+`python -m tests.bench.bench --adaptive --preprocess v2` (psm 3):
+
+| Variant | CER pooled | CER mean | CER median | WER | Word recall | Word precision | Word F1 | Critical tokens | Critical, POSTPROCESS=1 | CER, POSTPROCESS=1 | s/image |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| best only | 21.8% | 26.4% | 21.3% | 42.9% | 84.4% | 73.7% | 78.7% | 81.1% | 81.4% | 21.8% | 5.7 |
+| always both (reran 9/9) | 21.8% | 26.4% | 21.3% | 43.1% | 84.3% | 73.8% | 78.7% | 80.9% | 81.1% | 21.8% | 7.6 |
+| rerun if conf < 90 (reran 7/9) | 21.8% | 26.4% | 21.3% | 43.3% | 84.2% | 73.7% | 78.6% | 80.9% | 81.1% | 21.8% | 6.9 |
+| rerun if conf < 80 (reran 4/9) | 21.8% | 26.3% | 21.3% | 44.5% | 84.1% | 73.9% | 78.6% | 79.4% | 79.7% | 21.8% | 5.6 |
+| rerun if conf < 85 (reran 5/9) | 21.8% | 26.3% | 21.3% | 44.5% | 84.2% | 73.9% | 78.7% | 79.4% | 79.7% | 21.8% | 5.8 |
+| rerun if conf < 65 (reran 1/9) | 22.0% | 26.5% | 22.9% | 44.7% | 84.0% | 73.8% | 78.6% | 79.2% | 79.4% | 22.0% | 3.8 |
+| rerun if conf < 70 (reran 2/9) | 22.0% | 26.5% | 22.9% | 44.7% | 84.0% | 73.8% | 78.6% | 79.2% | 79.4% | 22.0% | 4.3 |
+| rerun if conf < 75 (reran 2/9) | 22.0% | 26.5% | 22.9% | 44.7% | 84.0% | 73.8% | 78.6% | 79.2% | 79.4% | 22.0% | 4.3 |
+| fast only (reran 0/9) | 22.2% | 27.6% | 22.9% | 45.1% | 83.7% | 73.5% | 78.2% | 78.9% | 79.2% | 22.2% | 3.6 |
+| rerun if conf < 50 (reran 0/9) | 22.2% | 27.6% | 22.9% | 45.1% | 83.7% | 73.5% | 78.2% | 78.9% | 79.2% | 22.2% | 3.6 |
+| rerun if conf < 60 (reran 0/9) | 22.2% | 27.6% | 22.9% | 45.1% | 83.7% | 73.5% | 78.2% | 78.9% | 79.2% | 22.2% | 3.6 |
+
+| Image | fast conf | best conf |
+| --- | --- | --- |
+| image-1 | 93.5 | 94.2 |
+| image-10 | 92.3 | 91.2 |
+| image-2 | 88.9 | 90.4 |
+| image-3 | 61.1 | 64.3 |
+| image-4 | 78.0 | 77.2 |
+| image-5 | 79.2 | 80.1 |
+| image-6 | 80.4 | 84.1 |
+| image-8 | 89.4 | 89.5 |
+| image-9 | 69.9 | 69.3 |
+
+- No threshold pays off: rerunning 4–5 of 9 pages (T = 80–85) gains 0.4
+  points of CER and 0.5 points of critical tokens for ~1.6x the time; always
+  taking the better of both gains 2 points of critical tokens for ~2.1x.
+  Confidence separates pages poorly (image-4/5/6 sit at 78–80 with very
+  different error rates). **Not adopted**; if critical tokens matter more
+  than speed, `best` alone (psm 4) is the simpler lever, decided on the Pi.
+
+### Why v2 is worse on image-6 (+4.8) and image-10 (+2.0)
+
+v2 = background flattening + scaling by text height. Split on these pages
+(psm 3, fast; CER / word recall / critical):
+
+| | baseline | v2 | v2 without flattening |
+| --- | --- | --- | --- |
+| image-6 | 39.5% / 90% / 100% | 44.3% / 88% / 100% | 40.3% / 86% / 100% |
+| image-10 | 3.3% / 93% / 77% | 5.3% / 93% / 73% | 4.8% / 93% / 77% |
+
+- image-6: mostly **reading order** (recall and critical tokens barely move).
+- image-10: ~0.5 points from flattening, ~1.5 from scaling (1.66x vs
+  baseline's 1.49x). Single-page, 1–2 point effects: within noise for 9 pages.
+- **Skipping flattening when the lighting map is flat was tried and
+  rejected.** Lighting spread (p95−p5)/p95 of the page centre: 0.14–0.18 on
+  images 4, 6, 8, 9, 10; 0.29–0.48 on 1, 3, 5. Skipping below 0.2 helps 6, 9,
+  10 slightly but loses image-4 (42.7% → 60.7%) and image-8 (8.5% → 11.0%):
+  pooled CER 22.2% → 24.8%, recall 83.7% → 78.5%, critical 78.9% → 73.7%.
+
+### Pi timings
+
+Not run yet. On the Pi (`--jobs 4`, the service's concurrency):
+
+```bash
+python -m tests.bench.bench Examples --preprocess v2 --psm 3,4 --dpi 0 --thresh 0 --model fast,best --jobs 4
+python -m tests.bench.bench Examples --adaptive --preprocess v2 --jobs 4
+```
+
+## 2026-11-10 (1) — selection set, white redaction (baseline + all variants)
 
 - **Data**: Examples/ images 1–6, 8–10 (9 pages; image-7 has no text yet).
   Holdout (images 11–19) not typed yet, so not run. Files as of 11:09.

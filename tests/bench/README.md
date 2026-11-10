@@ -38,6 +38,14 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
 
 ## Reading results
 
+- **Word recall / precision / F1**: words of the ground truth found in the
+  output, and output words that are in the ground truth, in any order.
+- **Critical tokens**: dates, ICD-10 codes, dosages and other numbers from
+  the ground truth, share read exactly; shown with and without
+  `POSTPROCESS=1`.
+- `--adaptive` replaces the variant grid with a sweep of "read with fast,
+  rerun with best when mean word confidence is below T".
+
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows
   whether one bad image drives the result.
