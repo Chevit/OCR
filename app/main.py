@@ -171,19 +171,16 @@ def line_pitch(img: Image.Image, angle: float) -> Optional[float]:
     # ponytail: O(rows x lags) pure-Python autocorrelation, ~0.1 s on a 1500 px
     # copy; switch to an FFT if bigger copies are ever needed.
     ac = {lag: corr(lag) for lag in lags}
-    # Only peaks count: a slow trend (a dark table around the page) makes the
-    # correlation fall steadily from the shortest lag without being a period.
-    peaks = [l for l in lags[1:-1] if ac[l - 1] < ac[l] >= ac[l + 1]]
+    # Only clear peaks count: a slow trend (a dark table around the page)
+    # makes the correlation fall steadily without being a period.
+    peaks = [l for l in lags[1:-1]
+             if ac[l - 1] < ac[l] >= ac[l + 1] and ac[l] >= 0.25 * energy]
     if not peaks:
         return None
-    pitch = max(peaks, key=ac.get)
-    # A multiple of the real pitch (e.g. two lines) peaks too; prefer the
-    # half when it is nearly as strong.
-    half = pitch // 2
-    if half in ac and max(ac.get(half - 1, 0), ac[half], ac.get(half + 1, 0)) > 0.8 * ac[pitch]:
-        pitch = max((half - 1, half, half + 1), key=lambda l: ac.get(l, 0))
-    if ac[pitch] < 0.25 * energy:
-        return None
+    # Multiples of the line pitch (two lines, three) peak too; take the
+    # shortest peak that is nearly as strong as the strongest.
+    strongest = max(ac[l] for l in peaks)
+    pitch = min(l for l in peaks if ac[l] >= 0.8 * strongest)
     return pitch * img.width / copy.width
 
 
