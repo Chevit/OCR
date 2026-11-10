@@ -62,11 +62,11 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - image-17 (baseline 0%): straightening fills corners white on a gray
   photographed page, Tesseract's Otsu then blacks out the whole sheet. v2
   doesn't hit it. Not fixed (baseline path only).
-- RapidOCR + PP-OCRv5 (bench only, Mac): critical tokens 90.3% vs 78.4%,
-  word recall 72.8% vs 83.8% (и for і), 4.3x the time, 2.3–3.6 GB RAM per
-  job. Pi run pending.
+- RapidOCR + PP-OCRv5 (bench only, offline image): critical tokens 90.3%
+  vs 78.4%, word recall 72.8% vs 83.8% (и for і); on the Pi 116.5 s/image
+  vs 10.3 for fast, 1.9 GB RAM per job. Not adopted.
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
-  remove the baseline path; RapidOCR Pi run; table TSV (step 5) not started.
+  remove the baseline path; table TSV (step 5) not started.
 
 ## Findings so far
 

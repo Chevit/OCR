@@ -115,16 +115,32 @@ Per image (CER / recall / critical), fast vs rapidocr:
   and the bench passes with RapidOCR numbers identical to the native run
   (20.7% / 72.8% / 90.3%, 21.0 s/image, 2.2 GB per job; fast 22.0% /
   83.8% / 78.4%, 2.9 s).
-- Pi timings pending. In the `OCR` folder on the Pi, after `git pull`:
+- **Raspberry Pi 5, bench image (offline), 4 jobs**, selection set
+  (commit 78c350c, before the pool-lock fix; scores and per-job RAM are
+  measured per process, so they are unaffected):
+
+| Variant | CER pooled | Word recall | Word F1 | Critical tokens | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr | 20.7% | 72.8% | 69.3% | **90.3%** | **116.5** | 1.9 GB |
+| v2, psm 3, best | 21.7% | 84.6% | 78.8% | 81.4% | 27.3 | 144 MB |
+| v2, psm 3, fast (service default) | 22.0% | 83.8% | 78.1% | 78.4% | 10.3 | 144 MB |
+
+  Scores are identical to the Mac and Docker runs (the engines are
+  deterministic); only time and RAM differ.
+
+- **Decision: RapidOCR is not adopted as an engine.** On the Pi it takes
+  116.5 s/image, 11x fast and ~8x the 15 s limit, and four jobs need ~7.8
+  GB of RAM. Its gain is critical tokens (+12 points), its loss word recall
+  (−11 points, и/й for і/ї). Revisit only with a mobile-size PP-OCRv5
+  detector and a recognizer that keeps Ukrainian letters, e.g. reading
+  only number/date regions.
+
+Rerun on the Pi (in the `OCR` folder, after `git pull`):
 
 ```bash
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \
   --preprocess v2 --psm 3 --dpi 0 --thresh 0 --model fast,best,rapidocr --jobs 4
 ```
-
-  If the Pi runs out of memory at 4 jobs (container killed, exit 137),
-  that is itself the answer for the service; `--jobs 2` then still gives
-  per-image times and RAM.
 
 ## 2026-11-10 (3) — noise filter, holdout, Pi timings
 
