@@ -143,6 +143,22 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertEqual(find_skew_angle(page), 0)
         self.assertEqual(find_skew_angle(Image.new("L", (400, 300), 255)), 0)
 
+    def test_tilt_ignores_slanted_page_edges_on_a_desk(self):
+        # A page photographed at an angle on a dark desk (like a keystoned
+        # photo): its outline slants, its text lines are level. Flattening
+        # the light (v2) turns the outline into bright/dark bands that used
+        # to outvote the text.
+        from app.main import flatten_background
+
+        desk = Image.new("L", (1000, 1400), 40)
+        draw = ImageDraw.Draw(desk)
+        draw.polygon([(140, 20), (980, 160), (900, 1390), (20, 1250)], fill=235)
+        for y in range(380, 1030, 45):
+            draw.rectangle((300, y, 700, y + 14), fill=0)
+
+        self.assertLess(abs(find_skew_angle(desk)), 1)
+        self.assertLess(abs(find_skew_angle(flatten_background(desk))), 1)
+
     def test_v2_finds_line_pitch_of_tilted_rows(self):
         from app.main import line_pitch
 

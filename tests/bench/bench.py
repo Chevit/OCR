@@ -13,9 +13,11 @@ scored, only the characters and words.
 """
 import argparse
 import asyncio
+import collections
 import itertools
 import os
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -66,10 +68,14 @@ def tesseract(png, psm, dpi, thresholding, model):
 
 
 def errors(truth, text):
-    """(char errors, chars, word errors, words) after collapsing whitespace."""
+    """(char errors, chars, word errors, words, words found, words to find) after collapsing
+    whitespace. Words found ignores order: a page read in another block order
+    (stamp before header) scores badly on CER yet has every word right."""
     t, h = " ".join(truth.split()), " ".join(text.split())
+    bag = lambda s: collections.Counter(re.findall(r"\w+", s.lower()))
     return (Levenshtein.distance(t, h), len(t),
-            Levenshtein.distance(t.split(), h.split()), len(t.split()))
+            Levenshtein.distance(t.split(), h.split()), len(t.split()),
+            sum((bag(t) & bag(h)).values()), sum(bag(t).values()))
 
 
 def run(samples, variants, jobs):
@@ -103,16 +109,17 @@ def report(results, baseline):
         ce, c, we, w = (sum(r[1][k] for r in rows) for k in range(4))
         per_image = [cer(r) for r in rows]
         post = sum(r[3][0] for r in rows) / c
+        found = sum(r[1][4] for r in rows) / sum(r[1][5] for r in rows)
         return (ce / c, statistics.mean(per_image), statistics.median(per_image),
-                we / w, post, sum(r[2] for r in rows) / len(rows))
+                we / w, found, post, sum(r[2] for r in rows) / len(rows))
 
-    print("| Variant | CER pooled | CER mean | CER median | WER pooled | CER pooled, POSTPROCESS=1 | s/image |")
-    print("| --- | --- | --- | --- | --- | --- | --- |")
+    print("| Variant | CER pooled | CER mean | CER median | WER pooled | Words found | CER pooled, POSTPROCESS=1 | s/image |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     ranked = sorted(results, key=lambda v: totals(results[v])[0])
     for v in ranked:
         mark = " (baseline)" if v == baseline else ""
-        cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:5])
-        print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[5]:.1f} |")
+        cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:6])
+        print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[6]:.1f} |")
 
     # Per image, the current service settings against the overall winner.
     best = ranked[0]

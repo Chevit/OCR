@@ -98,8 +98,11 @@ def find_skew_angle(img: Image.Image) -> float:
     """Find the angle (degrees, counter-clockwise) that levels slightly tilted
     text, e.g. a page photographed at an angle. When text rows are level, the
     ink per pixel row alternates sharply between lines and gaps; we rotate a
-    small copy and keep the angle where that row profile is sharpest."""
-    thumb = img.convert("L")
+    small copy and keep the angle where that row profile is sharpest. Only
+    the central 70% is measured: the edges of a page lying on a desk are
+    long slanted lines that would outvote the text."""
+    w, h = img.size
+    thumb = img.convert("L").crop((int(w * 0.15), int(h * 0.15), int(w * 0.85), int(h * 0.85)))
     thumb.thumbnail((600, 600))
     ink = thumb.point(lambda p: 255 if p < 128 else 0)  # text white on black
 
