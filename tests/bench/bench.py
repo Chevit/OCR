@@ -68,17 +68,7 @@ def tesseract(png, psm, dpi, thresholding, model, tsv=False):
     return out.stdout.decode("utf-8", errors="replace"), time.perf_counter() - started
 
 
-# Tokens a wrong character makes dangerous: dates, ICD-10 codes, dosages,
-# other numbers. Tried in this order at each position, so a date isn't
-# split into numbers.
-CRITICAL = re.compile(
-    r"(?<!\w)(?:"
-    r"\d{1,2}[./]\d{1,2}[./]\d{2,4}"  # dates
-    r"|[A-ZА-ЯІЇЄҐ]\d\d(?:\.\d+)?"  # ICD-10 codes
-    r"|\d+(?:,\d+)?\s?(?:мг|мл|г|од)"  # dosages
-    r"|\d+(?:[.,]\d+)?"  # other numbers
-    r")(?!\w)"
-)
+CRITICAL = app.CRITICAL  # dates, ICD-10 codes, dosages, numbers
 
 
 def bag(pattern, text, normalize=str.lower):

@@ -371,6 +371,19 @@ async def run_tesseract(
     return out
 
 
+# Tokens a wrong character makes dangerous: dates, ICD-10 codes, dosages,
+# other numbers. Tried in this order at each position, so a date isn't
+# split into numbers. The bench scores them and the word check in
+# static/index.html highlights them with the same parts (a test keeps the
+# copies equal).
+CRITICAL_PARTS = (
+    r"\d{1,2}[./]\d{1,2}[./]\d{2,4}",  # dates
+    r"[A-ZА-ЯІЇЄҐ]\d\d(?:\.\d+)?",  # ICD-10 codes
+    r"\d+(?:,\d+)?\s?(?:мг|мл|г|од)",  # dosages
+    r"\d+(?:[.,]\d+)?",  # other numbers
+)
+CRITICAL = re.compile(r"(?<!\w)(?:" + "|".join(CRITICAL_PARTS) + r")(?!\w)")
+
 # Latin and Cyrillic letters that look the same, in matching order.
 LATIN_LOOKALIKES = "aceiopxyïACEHIKMOPTXB"
 CYRILLIC_LOOKALIKES = "асеіорхуїАСЕНІКМОРТХВ"

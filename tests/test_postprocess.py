@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -62,3 +63,17 @@ class PostprocessSwitchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CriticalTokenTest(unittest.TestCase):
+    def test_finds_dates_codes_dosages_numbers(self):
+        text = "J06.9 від 12.05.2024, Amoxicillin 500 мг, t 38,5, I10, Пацієнт"
+        self.assertEqual(main.CRITICAL.findall(text),
+                         ["J06.9", "12.05.2024", "500 мг", "38,5", "I10"])
+
+    def test_word_check_uses_the_same_parts(self):
+        with open(os.path.join(os.path.dirname(__file__), "..", "static", "index.html"),
+                  encoding="utf-8") as f:
+            page = f.read()
+        for part in main.CRITICAL_PARTS:
+            self.assertIn("String.raw`%s`" % part, page)

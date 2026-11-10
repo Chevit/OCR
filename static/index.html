@@ -22,6 +22,7 @@
     --doubt: #B45309;                      /* dotted underline: doubtful word */
     --wrong-bg: rgba(220, 38, 38, .14);    /* fill: likely error */
     --wrong-line: #DC2626;
+    --crit: #1D4ED8;                       /* numbers, dates, codes: always check */
     --reading: "PT Serif", "Noto Serif", Georgia, serif;
   }
   @media (prefers-color-scheme: dark) {
@@ -39,6 +40,7 @@
       --doubt: #F5B54A;
       --wrong-bg: rgba(249, 112, 102, .22);
       --wrong-line: #F97066;
+      --crit: #8AB4F8;
     }
   }
   * { box-sizing: border-box; }
@@ -329,6 +331,9 @@
     text-underline-offset: 4px;
   }
   .conf-low { background: var(--wrong-bg); box-shadow: inset 0 -2px var(--wrong-line); border-radius: 3px; }
+  /* Numbers, dates, ICD-10 codes, dosages: marked whatever the confidence,
+     by weight as well as color, so it combines with the two marks above. */
+  .crit { color: var(--crit); font-weight: 600; }
   .transcript .current { outline: 2px solid var(--lamp); outline-offset: 2px; border-radius: 3px; }
 </style>
 </head>
@@ -426,6 +431,7 @@
         <div class="word-bar">
           <span class="conf-mid" id="midCount"></span>
           <span class="conf-low" id="lowCount"></span>
+          <span class="crit" id="critCount"></span>
           <span class="hidden" id="noFlags">Сумнівних слів немає</span>
           <button type="button" class="ghost" id="nextWordBtn">Наступне слово</button>
         </div>
@@ -458,6 +464,7 @@
   const wordTools = document.getElementById('wordTools');
   const wordInfo = document.getElementById('wordInfo');
   const midCount = document.getElementById('midCount');
+  const critCount = document.getElementById('critCount');
   const lowCount = document.getElementById('lowCount');
   const nextWordBtn = document.getElementById('nextWordBtn');
   const statusEl = document.getElementById('status');
@@ -491,6 +498,16 @@
   // Confidence (0-100) at or above which a word counts as sure / doubtful.
   const CONF_SURE = 85, CONF_DOUBT = 60;
 
+  // Numbers, dates, ICD-10 codes, dosages: one wrong character changes the
+  // meaning. Same parts as CRITICAL_PARTS in app/main.py (the bench scores
+  // these); \p{L}\p{N} stand in for Python's Unicode \w.
+  const CRITICAL = new RegExp('(?<![\\p{L}\\p{N}_])(?:' + [
+    String.raw`\d{1,2}[./]\d{1,2}[./]\d{2,4}`,
+    String.raw`[A-ZА-ЯІЇЄҐ]\d\d(?:\.\d+)?`,
+    String.raw`\d+(?:,\d+)?\s?(?:мг|мл|г|од)`,
+    String.raw`\d+(?:[.,]\d+)?`,
+  ].join('|') + ')(?![\\p{L}\\p{N}_])', 'u');
+
   // Tesseract TSV columns: level page block par line word left top width
   // height conf text. Level 5 rows are words; a new paragraph gets a blank line.
   function renderWords(tsv) {
@@ -519,6 +536,7 @@
         span.dataset.conf = Math.round(w.conf);
         span.dataset.box = w.box;
         if (w.conf < CONF_SURE) span.className = w.conf < CONF_DOUBT ? 'conf-low' : 'conf-mid';
+        if (CRITICAL.test(w.text)) span.classList.add('crit');
         resultRendered.append(span);
       });
     });
@@ -536,6 +554,9 @@
     const low = resultRendered.querySelectorAll('.conf-low').length;
     midCount.textContent = 'Сумнівні: ' + mid;
     lowCount.textContent = 'Ймовірні помилки: ' + low;
+    const crit = resultRendered.querySelectorAll('.crit').length;
+    critCount.textContent = 'Числа, дати, дози, коди МКХ-10: ' + crit + ' — звір з оригіналом';
+    critCount.classList.toggle('hidden', !crit);
     midCount.classList.toggle('hidden', !mid);
     lowCount.classList.toggle('hidden', !low);
     nextWordBtn.classList.toggle('hidden', !mid && !low);
