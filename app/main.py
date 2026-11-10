@@ -9,7 +9,7 @@ from typing import Literal, Optional
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 # --- Configuration (all overridable via environment variables) ----------
 
@@ -131,6 +131,10 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
             Image.new("RGBA", img.size, "white"), img.convert("RGBA")
         )
     img = ImageOps.autocontrast(img.convert("L"))
+    # Light text on a dark background (dark-theme screenshots): Tesseract and
+    # the tilt check both expect dark text on light, so flip mostly-dark images.
+    if ImageStat.Stat(img).mean[0] < 128:
+        img = ImageOps.invert(img)
 
     width, height = img.size
     megapixels = (width * height) / 1_000_000

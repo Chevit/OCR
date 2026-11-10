@@ -663,14 +663,17 @@
   // spills out of the editor. Fit it back in and select the whole image.
   // The frame is dropped first: Cropper.js won't shrink the image below it.
   function rotate(degrees) {
-    cropper.clear();
     cropper.rotate(degrees);
     fitImage();
   }
+  // Fit the image with a margin around it, so the frame's corners and edges
+  // aren't flush with the window and are easy to grab.
+  const CROP_MARGIN = 32;
   function fitImage() {
+    cropper.clear();  // a full-size frame would stop the image from shrinking
     const box = cropper.getContainerData();
     const image = cropper.getCanvasData();
-    const k = Math.min(box.width / image.width, box.height / image.height);
+    const k = Math.min((box.width - 2 * CROP_MARGIN) / image.width, (box.height - 2 * CROP_MARGIN) / image.height);
     const width = image.width * k, height = image.height * k;
     cropper.setCanvasData({ left: (box.width - width) / 2, top: (box.height - height) / 2, width, height });
     cropper.crop();
@@ -681,6 +684,7 @@
   document.getElementById('otherFileBtn').addEventListener('click', () => fileInput.click());
   document.getElementById('resetCropBtn').addEventListener('click', () => {
     cropper.reset();
+    fitImage();
   });
 
   function showSelection(file) {
@@ -711,6 +715,7 @@
       // the image; letting Cropper.js apply it again would rotate it twice.
       checkOrientation: false,
       ready() {
+        fitImage();
         if (!savedCrop) return;
         if (savedCrop.rotate) rotate(savedCrop.rotate);
         cropper.setData({ x: savedCrop.x, y: savedCrop.y, width: savedCrop.width, height: savedCrop.height });

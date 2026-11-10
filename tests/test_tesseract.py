@@ -118,6 +118,20 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("Failed loading language 'ukr'", response.json()["detail"])
 
+    def test_dark_theme_page_is_inverted_and_not_tilted(self):
+        from app.main import prepare_for_tesseract
+
+        page = Image.new("L", (800, 300), 15)
+        draw = ImageDraw.Draw(page)
+        for y in (100, 150, 200):  # light stripes standing in for text
+            draw.rectangle((150, y, 650, y + 12), fill=200)
+        buf = io.BytesIO()
+        page.save(buf, format="PNG")
+
+        prepared = Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8)))
+        self.assertGreater(prepared.getpixel((5, 5)), 128)  # background now light
+        self.assertEqual(prepared.size[0] / prepared.size[1], 800 / 300)  # not rotated
+
     def test_finds_tilt_of_rotated_text_rows(self):
         page = Image.new("L", (800, 600), 255)
         draw = ImageDraw.Draw(page)
