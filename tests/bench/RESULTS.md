@@ -37,7 +37,25 @@ Per image (CER / recall / critical), fast vs rapidocr-mobile: image-1
   fast on the Mac and 11x on the Pi; at that ratio the mobile detector
   lands near +6–7 s on the Pi, around the 5 s gate.
 
-Pi run (in the `OCR` folder, after `git pull`):
+**Raspberry Pi 5 Model B Rev 1.1, bench image (offline), 4 jobs**:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr-mobile | 19.4% | 73.4% | 70.1% | **82.6%** | **85.6%** | **38.3** | **760 MB** |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.8% | 72.2% | 76.6% | 10.4 | 135 MB |
+
+Scores and per-image numbers are identical to the Mac run; only time and
+RAM differ.
+
+- **Gate failed on both counts**: +27.9 s/image over fast (limit 5 s;
+  3.7x fast, far worse than the Mac's 1.6x) and 760 MB per job (limit
+  500 MB). The +6–7 s estimate above was wrong: on the Pi the mobile
+  detector is still 3x slower than the Mac ratio predicted.
+- **Decision: second engine closed.** No line-level merge (Tesseract
+  text, PP-OCR numbers). RapidOCR stays in the bench only; Tesseract fast
+  psm 3 stays the default, `model=best` the choice for number-heavy pages.
+
+Command used (in the `OCR` folder, after `git pull`):
 
 ```bash
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \

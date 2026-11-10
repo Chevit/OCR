@@ -30,7 +30,7 @@ EXIF transpose → flatten alpha → grayscale + global autocontrast → invert 
    - scale by text height: line pitch from the row profile of a ~1500 px levelled copy (autocorrelation peak; pitch ≈ 1.5–2x glyph height), target ~30 px glyph height within the existing limits, at most 2x down; fall back to megapixels when no clear pitch.
 4. **P1 Post-processing** (`POSTPROCESS=1`): per-word homoglyph normalization by the dominant unambiguous script; digit fixes (O→0, З→3, l/I→1) in numbers, dates and ICD-10 codes, only when real digits outnumber look-alikes (so "O2"/"CO2" stay). Apply to text and to TSV words (word check keeps boxes).
 5. **P2 Table mode as TSV**: build rows/cells from Tesseract word boxes (block/par/line ids for rows, gaps for cells, overlapping x-intervals across rows for columns). Visible with output "Текст"; word check still shows plain lines.
-6. **Later, gated on the bench**: OpenCV perspective correction (only if tilted/keystoned photos lose meaningfully); RapidOCR + PP-OCRv5 eslav (monkt/paddleocr-onnx, languages/eslav) as a second engine, only if it clearly beats Tesseract at comparable speed.
+6. **Later, gated on the bench**: OpenCV perspective correction (only if tilted/keystoned photos lose meaningfully); RapidOCR + PP-OCRv5 eslav (monkt/paddleocr-onnx, languages/eslav) as a second engine, only if it clearly beats Tesseract at comparable speed — closed 2026-11-10 (too slow and too large on the Pi, RESULTS.md (8)).
 7. **P3** Spell suggestions in word check: hunspell + dict_uk for low-confidence words. Tesseract `--user-words`: skipped (little effect on LSTM).
 
 ## Status (2026-11-10)
@@ -74,10 +74,10 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - Hybrid re-read of critical tokens (Tesseract + PP-OCRv5 recognizer):
   +0.3 points positional, not adopted (branch `experiment/hybrid-reread`).
 - RapidOCR with the PP-OCRv5 mobile detector (RESULTS.md (8)), last
-  engine experiment: Mac 82.6% positional critical, 73.4% recall, +1.8
-  s/image over fast, 760 MB per job. Gate on the Pi: ≤ 5 s/image over
-  fast and ≤ 500 MB per job, else the second engine is closed. Pi run
-  pending.
+  engine experiment: 82.6% positional critical vs 72.2%, recall 73.4% vs
+  84.3%; on the Pi 38.3 s/image vs 10.4 for fast (+27.9 s, gate ≤ 5 s)
+  and 760 MB per job (gate ≤ 500 MB). **Second engine closed**: no
+  Tesseract + PP-OCR merge; RapidOCR stays bench-only.
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
   remove the baseline path; table TSV (step 5) not started.
 
