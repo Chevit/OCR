@@ -12,7 +12,7 @@ python -m tests.bench.bench --psm 4 --model fast                # fewer variants
 ```
 
 On the Pi (or anywhere with Docker), run it in the `bench` image: the
-service image plus the bench packages and RapidOCR models, with no network
+service image plus the bench packages, with no network
 (`network_mode: none`), so documents can't leave the machine. Bench
 dependencies stay out of the production `requirements.txt` and image.
 
@@ -86,14 +86,7 @@ When a real upload reads badly, it becomes a case:
   rerun with best when mean word confidence is below T".
 - `--noise` replaces it with a sweep of dropping words below a confidence
   and tiny isolated blocks before output.
-- `--model ...,rapidocr` adds RapidOCR (PP-OCRv5 det + eslav rec) on the
-  same prepared page, an experiment the service doesn't use. The `bench`
-  image has it; outside Docker, `pip install -r
-  tests/bench/requirements-rapidocr.txt` and put the model files from the
-  Dockerfile into `tests/bench/models/` (hashes are checked). Every run
-  prints the peak RAM of one job per model. `rapidocr-v5-mobile`,
-  `rapidocr-v6-tiny` and `rapidocr-v6-small` swap in the official
-  PaddlePaddle detectors with their own settings (see `rapid.py`).
+- Every run prints the peak RAM of one job per model.
 
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows

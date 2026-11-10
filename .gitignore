@@ -230,5 +230,5 @@ tests/bench/images/
 tests/bench/synthetic/
 
 .DS_Store
-# RapidOCR model files, downloaded and checked by tests/bench/rapid.py
+# RapidOCR model files of the removed experiment (tag bench-paddleocr-experiment)
 tests/bench/models/

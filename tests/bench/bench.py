@@ -64,15 +64,9 @@ BASELINE = ("Last recorded baseline preparation, Examples/, psm 3, fast: CER 34.
 
 # Peak RSS (bytes) of one job, per model: what one parallel run needs.
 PEAK_RSS = collections.defaultdict(int)
-JOBS = 1
 
 
 def tesseract(png, psm, dpi, thresholding, model, tsv=False):
-    if model.startswith("rapidocr"):  # experiment, see rapid.py; psm/dpi/thresh don't apply
-        from tests.bench import rapid
-        text, seconds, rss = rapid.read(png, JOBS, model)
-        PEAK_RSS[model] = max(PEAK_RSS[model], rss)
-        return text, seconds
     cmd = [
         app.TESSERACT_CMD, "stdin", "stdout",
         *(["--tessdata-dir", app.TESSDATA_BEST_DIR] if model == "best" else []),
@@ -180,11 +174,6 @@ def run(samples, variants, jobs):
 
 def label(variant):
     psm, dpi, thresholding, model = variant
-    if model == "rapidocr":
-        return "rapidocr (PP-OCRv5 det + eslav rec)"
-    if model.startswith("rapidocr-"):
-        det = model.removeprefix("rapidocr-").replace("-", " ")
-        return f"rapidocr (PP-OCR{det} det + eslav rec)"
     return f"psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
@@ -364,10 +353,6 @@ def main():
     split = lambda s, f=str: [f(x) for x in s.split(",")]
     variants = list(itertools.product(split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
-    # RapidOCR ignores psm/dpi/thresh: one run is enough.
-    variants = sorted({(0, 0, 0) + v[3:] if v[3].startswith("rapidocr") else v for v in variants})
-    global JOBS
-    JOBS = a.jobs
     if ("best" in split(a.model) or a.adaptive) and not os.path.isdir(app.TESSDATA_BEST_DIR):
         sys.exit(f"model best needs {app.TESSDATA_BEST_DIR} (set TESSDATA_BEST_DIR)")
     samples = load_samples(a.dirs)

@@ -1,5 +1,7 @@
 # Benchmark results
 
+RapidOCR/PP-OCR code removed, see tag bench-paddleocr-experiment.
+
 ## 2026-11-10 (14) — baseline preparation removed, last baseline numbers
 
 The service now has one preparation (v2: lighting evened out, text scaled
