@@ -3,7 +3,7 @@ Slavic (eslav) recognizer from monkt/paddleocr-onnx, on the same prepared
 page Tesseract gets. Bench only; the service doesn't use it.
 
     docker compose run --build --rm bench python -m tests.bench.bench Examples \
-        --preprocess v2 --psm 3 --dpi 0 --thresh 0 --model fast,best,rapidocr --jobs 4
+        --psm 3 --dpi 0 --thresh 0 --model fast,best,rapidocr --jobs 4
 
 "rapidocr-v5-mobile", "rapidocr-v6-tiny" and "rapidocr-v6-small" swap in
 the official PaddlePaddle ONNX detectors with their own settings

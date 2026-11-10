@@ -68,9 +68,9 @@ path, fast vs best for Фрагмент):
 
 ```bash
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/holdout2/pages \
-  --preprocess baseline,v2 --psm 3 --dpi 0 --thresh 0 --model fast,best --jobs 4
+  --psm 3 --dpi 0 --thresh 0 --model fast,best --jobs 4
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/holdout2/crops \
-  --preprocess v2 --psm 3,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
+  --psm 3,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
 ```
 
 ## Reading results

@@ -184,30 +184,29 @@ class TesseractEngineTests(unittest.TestCase):
         self.assertGreater(lo, 230)  # dark corner lifted to near white
         self.assertLess(flat.getpixel((600, 410)), 80)  # text stays dark
 
-    def test_v2_scales_text_to_target_height(self):
+    def test_scales_text_to_target_height(self):
         from app.main import prepare_for_tesseract
 
-        page = Image.new("L", (2400, 1800), 255)  # 4.3 MP: baseline keeps the size
+        page = Image.new("L", (2400, 1800), 255)  # 4.3 MP: megapixels alone keep the size
         draw = ImageDraw.Draw(page)
         for y in range(100, 1700, 105):  # pitch 105 -> glyphs ~60 px -> half size
             draw.rectangle((150, y, 2250, y + 55), fill=0)
         buf = io.BytesIO()
         page.save(buf, format="PNG")
 
-        size = lambda pp, mp=8: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), mp, pp))).size
-        self.assertEqual(size("baseline"), (2400, 1800))
+        size = lambda mp: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), mp))).size
         # Under max_megapixels text height never shrinks the page...
-        self.assertEqual(size("v2"), (2400, 1800))
+        self.assertEqual(size(8), (2400, 1800))
         # ...over it, it may shrink below the megapixel cap (0.68x here).
-        self.assertAlmostEqual(size("v2", 2)[0], 1200, delta=40)
+        self.assertAlmostEqual(size(2)[0], 1200, delta=40)
 
-    def test_v2_misread_pitch_harmonic_does_not_shrink_the_page(self):
+    def test_misread_pitch_harmonic_does_not_shrink_the_page(self):
         # Every 4th line is a full dark line, the rest short and faint: the
         # row profile peaks at 4x the real 26 px pitch (image-12 in the
         # holdout read 114 px instead of 25.6 px and was shrunk to 0.5x).
         from app.main import line_pitch, prepare_for_tesseract
 
-        page = Image.new("L", (1200, 1600), 255)  # 1.9 MP: baseline enlarges it
+        page = Image.new("L", (1200, 1600), 255)  # 1.9 MP: the megapixel scale enlarges it 1.44x
         draw = ImageDraw.Draw(page)
         for i, y in enumerate(range(80, 1520, 26)):
             if i % 4 == 0:
@@ -218,8 +217,8 @@ class TesseractEngineTests(unittest.TestCase):
         buf = io.BytesIO()
         page.save(buf, format="PNG")
 
-        size = lambda pp: Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8, pp))).size
-        self.assertGreaterEqual(size("v2")[0], size("baseline")[0])
+        width = Image.open(io.BytesIO(prepare_for_tesseract(buf.getvalue(), 8))).width
+        self.assertGreaterEqual(width, int(1200 * (4 / 1.92) ** 0.5))
 
     def test_orientation_check_trusts_only_confident_answers(self):
         def osd(stdout, returncode=0):
@@ -280,8 +279,9 @@ class TesseractIntegrationTest(unittest.TestCase):
         # White corners from straightening this gray photographed page made
         # Tesseract's Otsu threshold black out the whole sheet (0 characters).
         # Synthetic gray pages didn't reproduce it, so this uses the real page.
+        # Found on the old baseline preparation; kept as a regression check.
         with open(IMAGE_17, "rb") as f:
-            png = prepare_for_tesseract(f.read(), 4.0, "baseline")
+            png = prepare_for_tesseract(f.read(), 4.0)
         out = subprocess.run(["tesseract", "stdin", "stdout", "-l", "ukr+eng", "--psm", "3"],
                              input=png, capture_output=True, check=True).stdout.decode()
         self.assertGreater(len(out.strip()), 500)

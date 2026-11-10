@@ -97,6 +97,10 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   best stays a user choice.
 - Holdout-2 layout ready: `Examples/holdout2/pages`, `Examples/holdout2/crops`
   (crops named after their page, `image-20a`).
+- Baseline preparation and `PREPROCESS` removed (2026-11-10): v2 is the
+  only path. Last baseline numbers on pages 1–10 (psm 3 fast): CER 34.0%,
+  critical 61.8% vs v2 21.6% / 72.0% (RESULTS.md (14)); the bench prints
+  them next to its report on `Examples/`.
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
   remove the baseline path; table TSV (step 5) not started.
 

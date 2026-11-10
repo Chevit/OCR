@@ -37,13 +37,7 @@ TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_bes
 # reads a cropped fragment better than 3, see tests/bench/RESULTS.md (11)).
 TESSERACT_PSM = {"text": 3, "table": 6, "block": 6}
 
-# Image preparation: "v2" evens out shadows and uneven light and sizes pages
-# by their text height; "baseline" (the old way) sizes them by megapixels.
-# ponytail: baseline stays only until the holdout benchmark confirms v2.
-PREPROCESS = os.environ.get("PREPROCESS", "v2")
-if PREPROCESS not in ("baseline", "v2"):
-    raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
-# Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
+# Glyph height (px) Tesseract's LSTM models read best; pages are scaled to it.
 TEXT_HEIGHT_PX = 30
 # On by default (0 turns it off): fix Latin/Cyrillic look-alike letters
 # inside words, letters read instead of digits in numbers, dates and ICD-10
@@ -207,11 +201,9 @@ def line_pitch(img: Image.Image, angle: float) -> Optional[float]:
     return pitch * img.width / copy.width
 
 
-def prepare_for_tesseract(
-    raw: bytes, max_megapixels: float, preprocess: Optional[str] = None
-) -> bytes:
-    """Clean up an image for Tesseract: upright, grayscale, high contrast, and
-    at a resolution close to a 300 DPI scan (v2: text about 30 px high)."""
+def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
+    """Clean up an image for Tesseract: upright, grayscale, even lighting,
+    high contrast, levelled, and scaled so text is about 30 px high."""
     img = ImageOps.exif_transpose(open_image(raw))  # phone photos are often rotated
 
     # Converting straight to grayscale turns transparent pixels black, which
@@ -226,10 +218,7 @@ def prepare_for_tesseract(
     if ImageStat.Stat(img).mean[0] < 128:
         img = ImageOps.invert(img)
 
-    v2 = (preprocess or PREPROCESS) == "v2"
-    angle = None
-    if v2:
-        img = ImageOps.autocontrast(flatten_background(img))
+    img = ImageOps.autocontrast(flatten_background(img))
 
     width, height = img.size
     megapixels = (width * height) / 1_000_000
@@ -242,18 +231,17 @@ def prepare_for_tesseract(
         scale = min(2.0, (target / megapixels) ** 0.5)
     else:
         scale = 1.0
-    if v2:
-        angle = find_skew_angle(img)
-        pitch = line_pitch(img, angle)
-        if pitch:
-            # Lines are ~1.5-2x the glyph height. Scale to the target height,
-            # at most 2x up and within max_megapixels. A pitch misread as a
-            # multiple of the line spacing asks for a shrink, so text height
-            # may only shrink pages over max_megapixels (at most 2x); smaller
-            # pages never get below the megapixel scale.
-            floor = 0.5 if megapixels > max_megapixels else scale
-            scale = min(2.0, (max_megapixels / megapixels) ** 0.5,
-                        max(floor, TEXT_HEIGHT_PX / (pitch / 1.75)))
+    angle = find_skew_angle(img)
+    pitch = line_pitch(img, angle)
+    if pitch:
+        # Lines are ~1.5-2x the glyph height. Scale to the target height,
+        # at most 2x up and within max_megapixels. A pitch misread as a
+        # multiple of the line spacing asks for a shrink, so text height
+        # may only shrink pages over max_megapixels (at most 2x); smaller
+        # pages never get below the megapixel scale.
+        floor = 0.5 if megapixels > max_megapixels else scale
+        scale = min(2.0, (max_megapixels / megapixels) ** 0.5,
+                    max(floor, TEXT_HEIGHT_PX / (pitch / 1.75)))
     if scale != 1.0:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)

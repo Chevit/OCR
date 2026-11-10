@@ -47,12 +47,19 @@ def load_samples(dirs):
     return samples
 
 
-def prepare(raw, preprocess):
+def prepare(raw):
     """The service's preparation; returns the PNG Tesseract reads and the seconds it took."""
     started = time.perf_counter()
-    png = app.prepare_for_tesseract(raw, app.TESSERACT_MAX_MEGAPIXELS, preprocess)
+    png = app.prepare_for_tesseract(raw, app.TESSERACT_MAX_MEGAPIXELS)
     png = asyncio.run(app.make_upright(png))
     return png, time.perf_counter() - started
+
+
+# The old preparation (sized by megapixels, no lighting fix), removed from
+# the service; its last numbers on Examples/ for comparison (RESULTS.md (14)).
+BASELINE = ("Last recorded baseline preparation, Examples/, psm 3, fast: CER 34.0%, "
+            "word recall 70.2%, word F1 71.4%, critical (positional) 61.8%, "
+            "2+ chars 67.4%, POSTPROCESS=1 62.3%")
 
 
 # Peak RSS (bytes) of one job, per model: what one parallel run needs.
@@ -160,26 +167,25 @@ def score(truth, text):
 def run(samples, variants, jobs):
     """variant -> [(sample name, score, seconds, score with POSTPROCESS=1)]"""
     with ThreadPoolExecutor(jobs) as pool:
-        keys = sorted({(v[0], i) for v in variants for i in range(len(samples))})
-        prepared = dict(zip(keys, pool.map(lambda k: prepare(samples[k[1]][1], k[0]), keys)))
+        prepared = list(pool.map(lambda smp: prepare(smp[1]), samples))
         tasks = [(v, i) for v in variants for i in range(len(samples))]
-        outputs = pool.map(lambda t: tesseract(prepared[t[0][0], t[1]][0], *t[0][1:]), tasks)
+        outputs = pool.map(lambda t: tesseract(prepared[t[1]][0], *t[0]), tasks)
         results = {}
         for (v, i), (text, seconds) in zip(tasks, outputs):
             name, _, truth = samples[i]
-            results.setdefault(v, []).append((name, score(truth, text), seconds + prepared[v[0], i][1],
+            results.setdefault(v, []).append((name, score(truth, text), seconds + prepared[i][1],
                                               score(truth, app.postprocess_text(text))))
     return results
 
 
 def label(variant):
-    preprocess, psm, dpi, thresholding, model = variant
+    psm, dpi, thresholding, model = variant
     if model == "rapidocr":
-        return f"{preprocess}, rapidocr (PP-OCRv5 det + eslav rec)"
+        return "rapidocr (PP-OCRv5 det + eslav rec)"
     if model.startswith("rapidocr-"):
         det = model.removeprefix("rapidocr-").replace("-", " ")
-        return f"{preprocess}, rapidocr (PP-OCR{det} det + eslav rec)"
-    return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
+        return f"rapidocr (PP-OCR{det} det + eslav rec)"
+    return f"psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
 def cer(s):
@@ -262,9 +268,9 @@ def tsv_text(tsv, min_conf=0, tiny_block=0):
 def noise_sweep(samples, variant, jobs, confs=(0, 10, 20, 30, 40, 50, 60), tiny=(0, 2, 4)):
     """Experiment: drop noise words before output, by confidence and by
     tiny isolated blocks. One TSV read per page; every filter is simulated."""
-    preprocess, psm, dpi, thresholding, model = variant
+    psm, dpi, thresholding, model = variant
     with ThreadPoolExecutor(jobs) as pool:
-        prepared = list(pool.map(lambda smp: prepare(smp[1], preprocess), samples))
+        prepared = list(pool.map(lambda smp: prepare(smp[1]), samples))
         outs = list(pool.map(lambda p: tesseract(p[0], psm, dpi, thresholding, model, tsv=True), prepared))
     rows = {}
     for n, k in itertools.product(confs, tiny):
@@ -277,13 +283,13 @@ def noise_sweep(samples, variant, jobs, confs=(0, 10, 20, 30, 40, 50, 60), tiny=
     table(rows)
 
 
-def adaptive_sweep(samples, preprocess, jobs, thresholds=(0, 50, 60, 65, 70, 75, 80, 85, 90, 101)):
+def adaptive_sweep(samples, jobs, thresholds=(0, 50, 60, 65, 70, 75, 80, 85, 90, 101)):
     """Experiment: read with the fast models; when their mean word confidence
     is below a threshold, read again with the best models and keep the more
     confident result. Both reads run once per page; every threshold is then
     simulated from them. 0 = never rerun, 101 = always."""
     with ThreadPoolExecutor(jobs) as pool:
-        prepared = list(pool.map(lambda smp: prepare(smp[1], preprocess), samples))
+        prepared = list(pool.map(lambda smp: prepare(smp[1]), samples))
         tasks = [(i, model) for i in range(len(samples)) for model in ("fast", "best")]
         outs = dict(zip(tasks, pool.map(
             lambda t: tesseract(prepared[t[0]][0], 3, 0, 0, t[1], tsv=True), tasks)))
@@ -341,14 +347,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("dirs", nargs="*", default=["Examples"],
                    help="folders with images and .gt.txt files (subfolders are not read)")
-    p.add_argument("--preprocess", default="baseline,v2")
     p.add_argument("--psm", default="3,4,6")
     p.add_argument("--dpi", default="0,300", help="0 = don't pass --dpi")
     p.add_argument("--thresh", default="0,2", help="thresholding_method: 0 Otsu, 2 Sauvola")
     p.add_argument("--model", default="fast,best")
     p.add_argument("--adaptive", action="store_true",
                    help="instead of the variant grid: sweep the fast-then-best rerun threshold "
-                        "(first --preprocess value, psm 3)")
+                        "(psm 3)")
     p.add_argument("--noise", action="store_true",
                    help="instead of the variant grid: sweep dropping low-confidence words and "
                         "tiny blocks (first value of each variant option)")
@@ -357,26 +362,28 @@ def main():
     a = p.parse_args()
 
     split = lambda s, f=str: [f(x) for x in s.split(",")]
-    variants = list(itertools.product(split(a.preprocess), split(a.psm, int), split(a.dpi, int),
+    variants = list(itertools.product(split(a.psm, int), split(a.dpi, int),
                                       split(a.thresh, int), split(a.model)))
-    # RapidOCR ignores psm/dpi/thresh: one run per preprocess value is enough.
-    variants = sorted({v[:1] + (0, 0, 0) + v[4:] if v[4].startswith("rapidocr") else v for v in variants})
+    # RapidOCR ignores psm/dpi/thresh: one run is enough.
+    variants = sorted({(0, 0, 0) + v[3:] if v[3].startswith("rapidocr") else v for v in variants})
     global JOBS
     JOBS = a.jobs
     if ("best" in split(a.model) or a.adaptive) and not os.path.isdir(app.TESSDATA_BEST_DIR):
         sys.exit(f"model best needs {app.TESSDATA_BEST_DIR} (set TESSDATA_BEST_DIR)")
     samples = load_samples(a.dirs)
     if a.adaptive:
-        print(f"{len(samples)} images, adaptive sweep, {split(a.preprocess)[0]}, psm 3; "
+        print(f"{len(samples)} images, adaptive sweep, psm 3; "
               f"timings on {machine()}, {a.jobs} parallel jobs\n")
-        return adaptive_sweep(samples, split(a.preprocess)[0], a.jobs)
+        return adaptive_sweep(samples, a.jobs)
     if a.noise:
         print(f"{len(samples)} images, noise sweep, {label(variants[0])}; "
               f"timings on {machine()}, {a.jobs} parallel jobs\n")
         return noise_sweep(samples, variants[0], a.jobs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
-    report(run(samples, variants, a.jobs), default=(app.PREPROCESS, 3, 0, 0, "fast"))
+    report(run(samples, variants, a.jobs), default=(3, 0, 0, "fast"))
+    if [os.path.normpath(d) for d in a.dirs] == ["Examples"]:
+        print("\n" + BASELINE)
     print("\nRAM peak per job: " + ", ".join(
         f"{m} {rss / 2**20:.0f} MB" for m, rss in sorted(PEAK_RSS.items())))
 

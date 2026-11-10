@@ -1,5 +1,23 @@
 # Benchmark results
 
+## 2026-11-10 (14) — baseline preparation removed, last baseline numbers
+
+The service now has one preparation (v2: lighting evened out, text scaled
+to ~30 px, levelled); `PREPROCESS` and the old baseline path (sized by
+megapixels only) are gone, and the bench lost `--preprocess`. Variant
+labels drop the "v2, " prefix. Last baseline run before removal, pages
+1–10 (Latin ICD-10 ground truth), offline bench image, Docker on an Apple
+M4 Pro, 4 jobs:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | Critical, POSTPROCESS=1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.7% | 72.0% | 76.3% | 72.2% |
+| baseline, psm 3, fast (removed) | 34.0% | 70.2% | 71.4% | 61.8% | 67.4% | 62.3% |
+
+`python -m tests.bench.bench Examples` prints the baseline row's numbers
+under its report for comparison (`BASELINE` in `bench.py`). Earlier
+baseline numbers for the other sets are in sections (1)–(11).
+
 ## 2026-11-10 (13) — crops-2: crops of pages 11–19 (seen)
 
 `Examples/crops-2/`: 9 crops, one per holdout page 11–19, ICD-10 letters
