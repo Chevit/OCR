@@ -277,10 +277,38 @@ async def tesseract_ocr(
     async with OCR_SLOTS:
         # Image work runs in a thread so a big photo doesn't stall other requests.
         image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
-        rotation = await detect_rotation(image_png)
-        if rotation:
-            image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
+        image_png = await make_upright(image_png)
         return await run_tesseract(image_png, mode, renderer, model), image_png
+
+
+def mean_word_confidence(tsv: str) -> float:
+    """Mean Tesseract confidence of the recognized words in a TSV; 0 if none."""
+    confs = [
+        float(c[10]) for c in (row.split("\t") for row in tsv.splitlines())
+        if len(c) == 12 and c[0] == "5" and c[11].strip() and float(c[10]) >= 0
+    ]
+    return sum(confs) / len(confs) if confs else 0.0
+
+
+async def make_upright(image_png: bytes) -> bytes:
+    """Turn the prepared page by the orientation check's answer. A 180° answer
+    is checked first: the check confidently flips upright pages that have
+    dark areas around them, and a flipped page loses all its text. So read
+    the page both ways (fast models) and keep the way Tesseract is surer of."""
+    rotation = await detect_rotation(image_png)
+    if not rotation:
+        return image_png
+    turned = await asyncio.to_thread(turn_upright, image_png, rotation)
+    if rotation == 180:
+        # ponytail: two extra fast reads (about 2x the time) for pages the
+        # check calls upside down; reuse the winning read if that gets slow.
+        as_is = mean_word_confidence(
+            (await run_tesseract(image_png, "text", "tsv")).decode("utf-8", "replace"))
+        flipped = mean_word_confidence(
+            (await run_tesseract(turned, "text", "tsv")).decode("utf-8", "replace"))
+        if flipped <= as_is:
+            return image_png
+    return turned
 
 
 def to_jpeg_data_url(image_png: bytes) -> str:
@@ -441,21 +469,22 @@ async def ocr(
         request,
         tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer, model),
     )
+    result = out.decode("utf-8", errors="replace")
     if output == "words":
         # TSV word boxes are in the prepared page's pixels, so the page
         # comes along: the UI shows it and draws boxes on it as-is.
         return JSONResponse({
-            "tsv": out.decode("utf-8", errors="replace"),
+            "tsv": result,
             "image": await asyncio.to_thread(to_jpeg_data_url, page_png),
             "seconds": round(time.time() - started, 2),
         })
     if output == "tsv":
         return PlainTextResponse(
-            out.decode("utf-8", errors="replace"),
+            result,
             media_type="text/tab-separated-values",
         )
 
-    text = clean_tesseract_text(out.decode("utf-8", errors="replace"))
+    text = clean_tesseract_text(result)
     if output == "text":
         return PlainTextResponse(text)
     return {

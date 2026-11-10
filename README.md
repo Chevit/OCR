@@ -62,8 +62,9 @@ in `app/main.py`.
 - Crop the image around the text with **Обрізати й повернути** (Enter applies
   the selection, Esc cancels it).
 - Tesseract turns sideways or upside-down photos upright (from EXIF, or with
-  Tesseract's orientation check when EXIF is missing), levels text tilted up to
-  10°, converts to grayscale, raises
+  Tesseract's orientation check when EXIF is missing; when that check says
+  upside down, the page is read both ways and the surer reading wins), levels
+  text tilted up to 10°, converts to grayscale, raises
   contrast, and keeps up to 8 MP (about a 300 DPI A4 scan) because it needs
   detail. Images under 4 MP (for example photos compressed by a messenger) are
   enlarged up to 2x, which roughly doubles recognition quality for them.

@@ -7,7 +7,7 @@ ground truth (name.png|jpg|jpeg|webp next to name.gt.txt). See README.md.
     python -m tests.bench.bench Examples/holdout --psm 4 --model fast
 
 Images go through the service's own preparation (prepare_for_tesseract and
-the orientation check), then every combination of the variant options runs.
+make_upright), then every combination of the variant options runs.
 Whitespace and line breaks are collapsed before comparing: layout is not
 scored, only the characters and words.
 """
@@ -47,9 +47,7 @@ def prepare(raw, preprocess):
     """The service's preparation; returns the PNG Tesseract reads and the seconds it took."""
     started = time.perf_counter()
     png = app.prepare_for_tesseract(raw, app.TESSERACT_MAX_MEGAPIXELS, preprocess)
-    rotation = asyncio.run(app.detect_rotation(png))
-    if rotation:
-        png = app.turn_upright(png, rotation)
+    png = asyncio.run(app.make_upright(png))
     return png, time.perf_counter() - started
 
 
