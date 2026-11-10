@@ -1,5 +1,51 @@
 # Benchmark results
 
+## 2026-11-10 (13) — crops-2: crops of pages 11–19 (seen)
+
+`Examples/crops-2/`: 9 crops, one per holdout page 11–19, ICD-10 letters
+Latin. The pages were seen (image-12 was studied), so this is a sanity
+check for Фрагмент, not a holdout. 136 critical tokens (one ≈ 0.7
+points). **Raspberry Pi 5 Model B Rev 1.1, bench image (offline), 4
+jobs**; a Mac run gives identical scores (same files on both):
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, POSTPROCESS=1 | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 6, best | **9.8%** | **85.8%** | **84.7%** | 77.2% | 77.2% | 79.3% | 9.3 | 92 MB |
+| **v2, psm 6, fast (Фрагмент)** | 10.3% | 83.2% | 82.0% | 75.7% | 76.5% | 76.9% | 4.1 | 68 MB |
+| v2, psm 3, best | 13.1% | 84.5% | 84.5% | 76.5% | 76.5% | 79.3% | 9.3 | 92 MB |
+| v2, psm 3, fast (default) | 13.8% | 82.5% | 82.4% | 77.2% | 77.9% | 79.3% | 4.1 | 68 MB |
+
+Per image, fast, psm 3 vs psm 6 (CER / recall / critical):
+
+| Image | psm 3 | psm 6 |
+| --- | --- | --- |
+| image-11 | 2.5% / 86% / 40% | 2.5% / 86% / 40% |
+| image-12 | 25.5% / 91% / 71% | 25.7% / 86% / 61% |
+| image-13 | 6.9% / 88% / 88% | 4.5% / 88% / 100% |
+| image-14 | 3.8% / 85% / 62% | 3.8% / 85% / 62% |
+| image-15 | 12.7% / 79% / 75% | 10.7% / 78% / 75% |
+| image-16 | 1.5% / 92% / 90% | 1.5% / 92% / 90% |
+| image-17 | 53.8% / 35% / 33% | 25.8% / 52% / 33% |
+| image-18 | 0.8% / 98% / 100% | 0.8% / 98% / 100% |
+| image-19 | 2.7% / 88% / 88% | 2.7% / 87% / 88% |
+
+- psm 6 confirms on CER: 13.8% → 10.3% (fast), mostly image-17 (53.8% →
+  25.8%, recall 35% → 52%) and image-13, 15. Five crops are unchanged.
+- Critical tokens are a wash: psm 6 fast −1.5 points (2 tokens), all on
+  image-12 (71% → 61%), offset by image-13 (88% → 100%). image-12 is the
+  crop whose page had the line-pitch scaling bug ((4)).
+- best with psm 6 is the most accurate (CER 9.8%, recall 85.8%, critical
+  +1.5 over fast) at 2.3x the time (9.3 vs 4.1 s per crop), under 15 s.
+  fast vs best for Фрагмент stays open for holdout-2.
+- POSTPROCESS=1: +0.8 points for psm 6 fast, none for best.
+
+Command:
+
+```bash
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/crops-2 \
+  --preprocess v2 --psm 3,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
+```
+
 ## 2026-11-10 (12) — ICD-10 ground truth in Latin, POSTPROCESS for codes
 
 **Ground truth**: ICD-10 codes always get a Latin letter now. 14 codes
@@ -37,8 +83,8 @@ jobs** (scores are deterministic, Pi gives the same):
 - psm 6 on whole pages: more critical tokens (+1.4 / +4.5 points) but
   much worse CER (+5.1 / +1.3) and WER (reading order); the default for
   pages stays psm 3, psm 6 only for Фрагмент.
-- crops-2 (crops of pages 11–19) was being filled while this ran (images
-  11–15 replaced, 16–19 still pages); its numbers aren't reported.
+- crops-2 (crops of pages 11–19) was being filled while this ran; see
+  (13) for its numbers.
 
 Command (per set):
 
