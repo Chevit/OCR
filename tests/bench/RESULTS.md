@@ -1,5 +1,67 @@
 # Benchmark results
 
+## 2026-11-10 (11) — crops re-run with 10 crops
+
+`Examples/crops/` now has 10 crops (image-6 to image-10 added; image-1 to
+image-5 unchanged, image-2's mixed Latin/Cyrillic H still in its
+`.gt.txt`). 123 critical tokens (one token ≈ 0.8 points). Offline bench
+image, **Docker on an Apple M4 Pro, 4 jobs** (not a Pi timing), 14
+variants; selected rows:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr (v6 small det + eslav rec) | 9.6% | 66.7% | 65.8% | **82.1%** | **83.0%** | 1.8 | 341 MB |
+| **v2, psm 6, fast** | **9.8%** | **84.1%** | **82.0%** | 65.9% | 65.0% | 1.2 | 97 MB |
+| v2, psm 4, fast | 10.2% | 83.5% | 81.1% | 69.1% | 67.0% | 1.2 | 97 MB |
+| v2, psm 6, best | 10.5% | 83.2% | 81.4% | 71.5% | 69.0% | 1.9 | 97 MB |
+| v2, psm 4, best | 11.1% | 83.7% | 81.5% | 72.4% | 69.0% | 1.8 | 97 MB |
+| v2, psm 3, fast (service default) | 11.9% | 81.0% | 79.8% | 60.2% | 58.0% | 1.2 | 97 MB |
+| v2, psm 3, best | 12.5% | 82.3% | 80.9% | 69.1% | 66.0% | 1.8 | 97 MB |
+| baseline, psm 3, fast | 18.0% | 75.5% | 76.3% | 45.5% | 45.0% | 0.9 | 97 MB |
+
+Per image, v2 fast psm 3 vs psm 6 (CER / recall / critical):
+
+| Image | psm 3 | psm 6 |
+| --- | --- | --- |
+| image-1 | 1.2% / 94% / 80% | 1.2% / 94% / 80% |
+| image-2 | 3.7% / 89% / 17% | 3.7% / 89% / 17% |
+| image-3 | 15.8% / 57% / 50% | 15.5% / 57% / 50% |
+| image-4 | 19.5% / 50% / 25% | 16.9% / 60% / 75% |
+| image-5 | 0.9% / 95% / 100% | 0.9% / 95% / 100% |
+| image-6 | 10.1% / 91% / 100% | 6.6% / 91% / 100% |
+| image-7 | 2.5% / 93% / 64% | 2.4% / 94% / 64% |
+| image-8 | 12.2% / 92% / 78% | 17.5% / 90% / 75% |
+| image-9 | 16.4% / 87% / 47% | 14.9% / 88% / 47% |
+| image-10 | 35.7% / 54% / 32% | 18.5% / 72% / 56% |
+
+- **On crops, psm 6 fast is the best Tesseract choice on CER, recall and
+  F1** (9.8% / 84.1% / 82.0% vs the default's 11.9% / 81.0% / 79.8%),
+  +5.7 points of critical tokens at the same speed. It is better or equal
+  on 9 of 10 crops; the big gains are image-10 (CER 35.7% → 18.5%) and
+  image-4. image-8 is the exception (CER 12.2% → 17.5%).
+- psm 4 is close to psm 6 (more critical tokens: 69.1%, slightly higher
+  CER). best adds 5–9 points of critical tokens at ~1.5x the time, with
+  higher CER.
+- v2 beats baseline on crops too (psm 3 fast: CER 18.0% → 11.9%).
+- RapidOCR still leads on critical tokens (+16 over psm 6 fast) and loses
+  17 points of recall; closed on Pi time in (9).
+- psm 6 was clearly worse on full pages ((1)), so this argues for a
+  separate crop / text-block mode (psm 6), not a new default.
+
+Command (Mac):
+
+```bash
+docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
+  --preprocess baseline,v2 --psm 3,4,6 --dpi 0 --thresh 0 --model fast,best,rapidocr-v6-small --jobs 4
+```
+
+Pi (after copying `Examples/crops/` over; `Examples/` is git-ignored):
+
+```bash
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
+  --preprocess v2 --psm 3,4,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
+```
+
 ## 2026-11-10 (10) — cropped text regions (`Examples/crops/`)
 
 Five crops of text regions (240–426 px tall strips, 980–2114 px wide) cut
