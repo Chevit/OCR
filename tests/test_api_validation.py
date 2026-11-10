@@ -92,3 +92,31 @@ class CancelOnDisconnectTests(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 499)
         self.assertEqual(cancelled, [True])
+
+
+class ConcurrencyTests(unittest.TestCase):
+    def test_runs_at_most_the_limit_at_once_and_finishes_all(self):
+        import asyncio
+
+        from app import main
+
+        running = peak = 0
+
+        async def slow_tesseract(*args):
+            nonlocal running, peak
+            running += 1
+            peak = max(peak, running)
+            await asyncio.sleep(0.05)
+            running -= 1
+            return b"text"
+
+        async def go():
+            with patch.object(main, "OCR_SLOTS", asyncio.Semaphore(2)), \
+                 patch.object(main, "prepare_for_tesseract", return_value=b"png"), \
+                 patch.object(main, "detect_rotation", return_value=0), \
+                 patch.object(main, "run_tesseract", slow_tesseract):
+                return await asyncio.gather(*(main.tesseract_ocr(b"x", "text", 8) for _ in range(6)))
+
+        results = asyncio.run(go())
+        self.assertEqual(len(results), 6)
+        self.assertEqual(peak, 2)

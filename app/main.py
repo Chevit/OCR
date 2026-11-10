@@ -22,6 +22,12 @@ TESSERACT_LANGS = os.environ.get("TESSERACT_LANGS", "ukr+eng")
 # Tesseract needs detail (~300 DPI): an A4 page at 300 DPI is ~8.7 MP.
 TESSERACT_MAX_MEGAPIXELS = float(os.environ.get("TESSERACT_MAX_MEGAPIXELS", "8"))
 TESSERACT_TIMEOUT = float(os.environ.get("TESSERACT_TIMEOUT", "120"))
+# Recognitions running at once; the rest wait their turn. Each one gets a single
+# CPU thread (OMP_THREAD_LIMIT), so the default fills a 4-core Pi 5 exactly.
+OCR_CONCURRENCY = int(os.environ.get("OCR_CONCURRENCY", "4"))
+TESSERACT_ENV = {**os.environ, "OMP_THREAD_LIMIT": "1"}
+OCR_SLOTS = asyncio.Semaphore(OCR_CONCURRENCY)
+
 # Models from tessdata_best: slower, usually more accurate. The default
 # (fast) models come with the tesseract packages; the image adds these.
 TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_best")
@@ -156,6 +162,7 @@ async def detect_rotation(image_png: bytes) -> int:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=TESSERACT_ENV,
         )
         out, _ = await asyncio.wait_for(proc.communicate(image_png), 30)
     except (OSError, TimeoutError):
@@ -181,12 +188,14 @@ async def tesseract_ocr(
     """Returns Tesseract's raw output (plain text by default, or the file of
     the given renderer: "tsv" = words with confidence and position) and the
     prepared PNG it read, which word positions refer to."""
-    # Image work runs in a thread so a big photo doesn't stall other requests.
-    image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
-    rotation = await detect_rotation(image_png)
-    if rotation:
-        image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
-    return await run_tesseract(image_png, mode, renderer, model), image_png
+    # The whole job holds a slot, so CPU and RAM stay bounded; extra requests wait.
+    async with OCR_SLOTS:
+        # Image work runs in a thread so a big photo doesn't stall other requests.
+        image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
+        rotation = await detect_rotation(image_png)
+        if rotation:
+            image_png = await asyncio.to_thread(turn_upright, image_png, rotation)
+        return await run_tesseract(image_png, mode, renderer, model), image_png
 
 
 def to_jpeg_data_url(image_png: bytes) -> str:
@@ -214,6 +223,7 @@ async def run_tesseract(
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=TESSERACT_ENV,
         )
     except FileNotFoundError:
         raise HTTPException(
