@@ -67,28 +67,52 @@ def tesseract(png, psm, dpi, thresholding, model):
     return out.stdout.decode("utf-8", errors="replace"), time.perf_counter() - started
 
 
-def errors(truth, text):
-    """(char errors, chars, word errors, words, words found, words to find) after collapsing
-    whitespace. Words found ignores order: a page read in another block order
-    (stamp before header) scores badly on CER yet has every word right."""
+# Tokens a wrong character makes dangerous: dates, ICD-10 codes, dosages,
+# other numbers. Tried in this order at each position, so a date isn't
+# split into numbers.
+CRITICAL = re.compile(
+    r"(?<!\w)(?:"
+    r"\d{1,2}[./]\d{1,2}[./]\d{2,4}"  # dates
+    r"|[A-ZА-ЯІЇЄҐ]\d\d(?:\.\d+)?"  # ICD-10 codes
+    r"|\d+(?:,\d+)?\s?(?:мг|мл|г|од)"  # dosages
+    r"|\d+(?:[.,]\d+)?"  # other numbers
+    r")(?!\w)"
+)
+
+
+def bag(pattern, text, normalize=str.lower):
+    return collections.Counter(normalize(m) for m in re.findall(pattern, text))
+
+
+def score(truth, text):
+    """Counts for one page, summed over pages for pooled rates. Whitespace is
+    collapsed first. Word recall/precision ignore order: a page read in
+    another block order (stamp before header) has bad CER yet every word."""
     t, h = " ".join(truth.split()), " ".join(text.split())
-    bag = lambda s: collections.Counter(re.findall(r"\w+", s.lower()))
-    return (Levenshtein.distance(t, h), len(t),
-            Levenshtein.distance(t.split(), h.split()), len(t.split()),
-            sum((bag(t) & bag(h)).values()), sum(bag(t).values()))
+    words_t, words_h = bag(r"\w+", t), bag(r"\w+", h)
+    no_space = lambda m: "".join(m.split())
+    crit_t, crit_h = bag(CRITICAL, t, no_space), bag(CRITICAL, h, no_space)
+    return collections.Counter(
+        char_errors=Levenshtein.distance(t, h), chars=len(t),
+        word_errors=Levenshtein.distance(t.split(), h.split()), words=len(t.split()),
+        words_found=sum((words_t & words_h).values()),
+        words_truth=sum(words_t.values()), words_output=sum(words_h.values()),
+        critical_found=sum((crit_t & crit_h).values()), critical_truth=sum(crit_t.values()),
+    )
 
 
 def run(samples, variants, jobs):
+    """variant -> [(sample name, score, seconds, score with POSTPROCESS=1)]"""
     with ThreadPoolExecutor(jobs) as pool:
         keys = sorted({(v[0], i) for v in variants for i in range(len(samples))})
         prepared = dict(zip(keys, pool.map(lambda k: prepare(samples[k[1]][1], k[0]), keys)))
         tasks = [(v, i) for v in variants for i in range(len(samples))]
         outputs = pool.map(lambda t: tesseract(prepared[t[0][0], t[1]][0], *t[0][1:]), tasks)
-        results = {}  # variant -> list of (sample name, errors, seconds)
+        results = {}
         for (v, i), (text, seconds) in zip(tasks, outputs):
             name, _, truth = samples[i]
-            results.setdefault(v, []).append((name, errors(truth, text), seconds + prepared[v[0], i][1],
-                                              errors(truth, app.postprocess_text(text))))
+            results.setdefault(v, []).append((name, score(truth, text), seconds + prepared[v[0], i][1],
+                                              score(truth, app.postprocess_text(text))))
     return results
 
 
@@ -97,37 +121,59 @@ def label(variant):
     return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 
-def cer(row):
-    return row[1][0] / row[1][1]
+def cer(s):
+    return s["char_errors"] / s["chars"]
 
 
-def report(results, baseline):
-    """Variants ranked by pooled CER (all errors / all characters), with the
-    mean and median of per-image CER beside it: one bad image moves the
-    pooled number a lot, the median barely."""
-    def totals(rows):
-        ce, c, we, w = (sum(r[1][k] for r in rows) for k in range(4))
-        per_image = [cer(r) for r in rows]
-        post = sum(r[3][0] for r in rows) / c
-        found = sum(r[1][4] for r in rows) / sum(r[1][5] for r in rows)
-        return (ce / c, statistics.mean(per_image), statistics.median(per_image),
-                we / w, found, post, sum(r[2] for r in rows) / len(rows))
+def rates(s):
+    """Rates from (summed) counts: CER, WER, word recall/precision/F1, critical tokens."""
+    recall = s["words_found"] / s["words_truth"]
+    precision = s["words_found"] / s["words_output"] if s["words_output"] else 0.0
+    f1 = 2 * recall * precision / (recall + precision) if recall + precision else 0.0
+    critical = s["critical_found"] / s["critical_truth"] if s["critical_truth"] else 1.0
+    return cer(s), s["word_errors"] / s["words"], recall, precision, f1, critical
 
-    print("| Variant | CER pooled | CER mean | CER median | WER pooled | Words found | CER pooled, POSTPROCESS=1 | s/image |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
-    ranked = sorted(results, key=lambda v: totals(results[v])[0])
-    for v in ranked:
-        mark = " (service default)" if v == baseline else ""
-        cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:6])
-        print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[6]:.1f} |")
+
+COLUMNS = ("CER pooled", "CER mean", "CER median", "WER", "Word recall", "Word precision",
+           "Word F1", "Critical tokens", "Critical, POSTPROCESS=1", "CER, POSTPROCESS=1")
+
+
+def summary(rows):
+    """One table row's numbers: pooled rates, plus the mean and median of
+    per-image CER (one bad image moves the pooled number, the median barely)."""
+    total = sum((r[1] for r in rows), collections.Counter())
+    post = sum((r[3] for r in rows), collections.Counter())
+    pooled_cer, wer, recall, precision, f1, critical = rates(total)
+    per_image = [cer(r[1]) for r in rows]
+    return (pooled_cer, statistics.mean(per_image), statistics.median(per_image), wer,
+            recall, precision, f1, critical, rates(post)[5], cer(post),
+            sum(r[2] for r in rows) / len(rows))
+
+
+def table(named_rows, mark=None):
+    """Markdown table of summary() rows, ranked by pooled CER."""
+    print("| Variant | " + " | ".join(COLUMNS) + " | s/image |")
+    print("|" + " --- |" * (len(COLUMNS) + 2))
+    for name, rows in sorted(named_rows.items(), key=lambda kv: summary(kv[1])[0]):
+        *pct, seconds = summary(rows)
+        tag = " (service default)" if name == mark else ""
+        print(f"| {name}{tag} | " + " | ".join(f"{x:.1%}" for x in pct) + f" | {seconds:.1f} |")
+
+
+def report(results, default):
+    table({label(v): rows for v, rows in results.items()}, mark=label(default))
 
     # Per image, the service's default settings against the overall winner.
-    best = ranked[0]
-    cols = [baseline, best] if baseline in results and best != baseline else [best]
-    print("\n| Image | " + " | ".join(f"CER {label(v)}" for v in cols) + " |")
+    best = min(results, key=lambda v: summary(results[v])[0])
+    cols = [default, best] if default in results and best != default else [best]
+    print("\n| Image | " + " | ".join(f"{label(v)}: CER / recall / critical" for v in cols) + " |")
     print("| --- |" + " --- |" * len(cols))
     for i, (name, *_rest) in enumerate(results[best]):
-        print(f"| {name} | " + " | ".join(f"{cer(results[v][i]):.1%}" for v in cols) + " |")
+        cells = []
+        for v in cols:
+            c, _, recall, _, _, critical = rates(results[v][i][1])
+            cells.append(f"{c:.1%} / {recall:.0%} / {critical:.0%}")
+        print(f"| {name} | " + " | ".join(cells) + " |")
 
 
 def machine():
@@ -165,7 +211,7 @@ def main():
     samples = load_samples(a.dirs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
-    report(run(samples, variants, a.jobs), baseline=(app.PREPROCESS, 3, 0, 0, "fast"))
+    report(run(samples, variants, a.jobs), default=(app.PREPROCESS, 3, 0, 0, "fast"))
 
 
 if __name__ == "__main__":
