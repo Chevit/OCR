@@ -1,5 +1,110 @@
 # Benchmark results
 
+## 2026-11-10 (3) — noise filter, holdout, running on the Pi
+
+### Running the bench on the Pi
+
+The service image has no `tests/` and no rapidfuzz, and production
+`requirements.txt` stays without bench dependencies. Run the bench in a
+throwaway container of the service image: `--build` rebuilds it from the
+checkout (the app is baked in at build time), `tests/` and `Examples/` are
+mounted, and rapidfuzz is installed into that container only (`--rm` deletes
+it afterwards). The tessdata_best models are already in the image.
+
+```bash
+# Chosen variant and the candidates for the default model
+sudo docker compose run --build --rm -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+  -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
+  sh -c "pip install -q --root-user-action=ignore -r tests/bench/requirements.txt && \
+    python -m tests.bench.bench Examples --preprocess v2 --psm 3,4 --dpi 0 --thresh 0 --model fast,best --jobs 4"
+
+# Adaptive model (fast, rerun with best below a confidence threshold)
+sudo docker compose run --rm -e PIP_DISABLE_PIP_VERSION_CHECK=1 \
+  -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
+  sh -c "pip install -q --root-user-action=ignore -r tests/bench/requirements.txt && \
+    python -m tests.bench.bench Examples --adaptive --preprocess v2 --jobs 4"
+```
+
+Checked with Docker on the Mac: the image's Tesseract 5.5.0 gives v2 psm 3
+fast 22.2% pooled CER, as the native 5.5.4 does. The first line of the output
+names the machine; on the Pi it reads `Raspberry Pi 5 ...`.
+
+**Default model decision**: if psm 4 + best takes ≤ 15 s/image there at
+`--jobs 4`, it becomes the default (`model=best`, psm 4 for text mode).
+Otherwise fast psm 3 stays.
+
+| Variant | s/image, Pi 5, 4 jobs |
+| --- | --- |
+| v2, psm 3, fast | not run yet |
+| v2, psm 4, best | not run yet |
+
+### Dropping noise words (not adopted)
+
+v2, psm 3, fast; selection set (9 pages). Words with confidence below N are
+dropped before output; "blocks ≤ k chars" also drops Tesseract blocks with at
+most k characters in all (specks, stamp edges). `--noise` simulates every
+filter from one TSV read per page. Adoption rule: F1 rises with no more than
+1 point of recall lost.
+
+| Filter | CER pooled | Word recall | Word precision | Word F1 | Critical tokens |
+| --- | --- | --- | --- | --- | --- |
+| keep all | 22.2% | 83.7% | 73.5% | 78.2% | 78.9% |
+| keep all, blocks ≤ 2 chars | 22.3% | 83.6% | 73.5% | 78.2% | 78.9% |
+| keep all, blocks ≤ 4 chars | 22.3% | 83.6% | 73.5% | 78.2% | 78.9% |
+| drop conf < 10 | 21.8% | 83.2% | 75.0% | 78.9% | 78.7% |
+| drop conf < 20 | 21.6% | 82.9% | 76.3% | 79.4% | 78.7% |
+| drop conf < 30 | 21.4% | 82.7% | 77.8% | 80.2% | 78.2% |
+| drop conf < 40 | 21.1% | 82.3% | 79.2% | 80.8% | 77.9% |
+| drop conf < 50 | 21.2% | 81.4% | 80.7% | 81.1% | 76.9% |
+| drop conf < 60 | 21.4% | 80.8% | 82.1% | 81.5% | 76.4% |
+
+- Tiny blocks: no effect at all on these pages.
+- Confidence: N = 10, 20, 30 pass the rule (F1 +0.7 / +1.2 / +2.0, recall
+  −0.5 / −0.8 / −1.0). Every N also loses critical tokens (−0.2 / −0.2 /
+  −0.7), and a dropped word is gone without a trace, while word check
+  already marks the same words red for the reader to fix. **Not adopted**;
+  if wanted, N = 20 is the safe choice, for text output only.
+
+### Holdout (images 11–19), reported once for the final choice
+
+Ground truth for images 11–19 moved to `Examples/holdout/` (files 11–17 were
+named `image-N..gt.txt` and were not picked up). Apple M4 Pro, 12 jobs.
+
+| Variant | CER pooled | CER median | Word recall | Word F1 | Critical tokens | s/image |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 4, best | 34.9% | 26.6% | 71.8% | 71.4% | 65.5% | 5.5 |
+| v2, psm 4, fast | 35.1% | 26.5% | 70.8% | 70.6% | 64.7% | 3.3 |
+| v2, psm 3, best | 35.1% | 24.4% | 70.7% | 71.9% | 63.6% | 5.8 |
+| **v2, psm 3, fast (service default)** | 35.3% | 25.0% | 69.6% | 70.8% | 62.2% | 3.2 |
+| baseline, psm 3, best | 38.3% | 34.2% | 68.4% | 71.4% | 66.7% | 5.6 |
+| baseline, psm 3, fast | 38.4% | 33.5% | 67.4% | 70.4% | 66.4% | 3.3 |
+| baseline, psm 4, best | 39.1% | 34.1% | 67.5% | 70.5% | 65.5% | 5.5 |
+| baseline, psm 4, fast | 39.1% | 33.5% | 66.8% | 69.9% | 65.0% | 3.0 |
+
+Per image, psm 3 fast (CER / recall / critical tokens):
+
+| Image | Critical tokens in truth | baseline | v2 |
+| --- | --- | --- | --- |
+| image-11 | 32 | 52.5% / 51% / 47% | 25.0% / 80% / 72% |
+| image-12 | 58 | 42.7% / 71% / 71% | **74.6% / 15% / 10%** |
+| image-13 | 27 | 32.7% / 80% / 52% | 42.6% / 73% / 56% |
+| image-14 | 22 | 37.7% / 61% / 68% | 9.7% / 87% / 86% |
+| image-15 | 64 | 26.6% / 82% / 88% | 27.6% / 83% / 83% |
+| image-16 | 20 | 21.0% / 79% / 55% | 8.4% / 92% / 65% |
+| image-17 | 17 | 100.0% / 0% / 0% | 55.9% / 54% / 41% |
+| image-18 | 27 | 33.5% / 63% / 74% | 14.6% / 87% / 93% |
+| image-19 | 90 | 20.4% / 83% / 72% | 24.3% / 80% / 68% |
+
+- **v2 holds on CER, recall and F1** (pooled CER 38.4% → 35.3%, median
+  33.5% → 25.0%, better on 6 of 9 pages), **but not on critical tokens**
+  (66.4% → 62.2%). The whole gap is image-12.
+- **image-12**: after shadow evening, `line_pitch` reads 114 px instead of
+  the real 25.6 px (a multiple of the line spacing), so the page is shrunk by
+  the 0.5x floor (1200×1600 → 622×816) instead of enlarged. Same failure
+  class as the image-2 pitch fix. Not tuned here, to keep the holdout honest.
+- **Baseline path kept** until the image-12 failure is fixed and verified on
+  new pages.
+
 ## 2026-11-10 (2) — v2 default, new metrics, adaptive model, image-6/10
 
 Same selection set (9 pages), Apple M4 Pro, 12 parallel jobs. **No Pi
@@ -101,12 +206,7 @@ v2 = background flattening + scaling by text height. Split on these pages
 
 ### Pi timings
 
-Not run yet. On the Pi (`--jobs 4`, the service's concurrency):
-
-```bash
-python -m tests.bench.bench Examples --preprocess v2 --psm 3,4 --dpi 0 --thresh 0 --model fast,best --jobs 4
-python -m tests.bench.bench Examples --adaptive --preprocess v2 --jobs 4
-```
+See section (3): run inside the service image.
 
 ## 2026-11-10 (1) — selection set, white redaction (baseline + all variants)
 

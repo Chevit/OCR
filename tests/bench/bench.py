@@ -167,13 +167,38 @@ def report(results, default):
         print(f"| {name} | " + " | ".join(cells) + " |")
 
 
-def tsv_text(tsv):
-    """Plain text from a Tesseract TSV: words joined per line."""
+def tsv_text(tsv, min_conf=0, tiny_block=0):
+    """Plain text from a Tesseract TSV: words joined per line. Optionally
+    drops words with confidence below min_conf, and blocks with at most
+    tiny_block characters in all (specks and stamp edges read as text)."""
+    words = [c for c in (row.split("\t") for row in tsv.splitlines())
+             if len(c) == 12 and c[0] == "5" and c[11].strip()]
+    block_chars = collections.Counter()
+    for c in words:
+        block_chars[c[2]] += len(c[11].strip())
     lines = {}
-    for c in (row.split("\t") for row in tsv.splitlines()):
-        if len(c) == 12 and c[0] == "5" and c[11].strip():
+    for c in words:
+        if float(c[10]) >= min_conf and block_chars[c[2]] > tiny_block:
             lines.setdefault(tuple(c[2:5]), []).append(c[11])
-    return "\n".join(" ".join(words) for words in lines.values())
+    return "\n".join(" ".join(ws) for ws in lines.values())
+
+
+def noise_sweep(samples, variant, jobs, confs=(0, 10, 20, 30, 40, 50, 60), tiny=(0, 2, 4)):
+    """Experiment: drop noise words before output, by confidence and by
+    tiny isolated blocks. One TSV read per page; every filter is simulated."""
+    preprocess, psm, dpi, thresholding, model = variant
+    with ThreadPoolExecutor(jobs) as pool:
+        prepared = list(pool.map(lambda smp: prepare(smp[1], preprocess), samples))
+        outs = list(pool.map(lambda p: tesseract(p[0], psm, dpi, thresholding, model, tsv=True), prepared))
+    rows = {}
+    for n, k in itertools.product(confs, tiny):
+        name = (f"drop conf < {n}" if n else "keep all") + (f", blocks <= {k} chars" if k else "")
+        rows[name] = []
+        for (sample, _, truth), (png, prep_s), (tsv, ocr_s) in zip(samples, prepared, outs):
+            text = tsv_text(tsv, n, k)
+            rows[name].append((sample, score(truth, text), prep_s + ocr_s,
+                               score(truth, app.postprocess_text(text))))
+    table(rows)
 
 
 def adaptive_sweep(samples, preprocess, jobs, thresholds=(0, 50, 60, 65, 70, 75, 80, 85, 90, 101)):
@@ -222,6 +247,13 @@ def machine():
             return f.read().strip("\0\n")
     except OSError:
         pass
+    try:  # Raspberry Pi inside Docker, where /proc/device-tree is hidden
+        with open("/proc/cpuinfo") as f:
+            model = [l.split(":", 1)[1].strip() for l in f if l.startswith("Model")]
+        if model:
+            return model[0]
+    except OSError:
+        pass
     try:
         return subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],  # macOS
                               capture_output=True, text=True, check=True).stdout.strip()
@@ -241,6 +273,9 @@ def main():
     p.add_argument("--adaptive", action="store_true",
                    help="instead of the variant grid: sweep the fast-then-best rerun threshold "
                         "(first --preprocess value, psm 3)")
+    p.add_argument("--noise", action="store_true",
+                   help="instead of the variant grid: sweep dropping low-confidence words and "
+                        "tiny blocks (first value of each variant option)")
     p.add_argument("--jobs", type=int, default=os.cpu_count(),
                    help="parallel tesseract runs; 1 gives the cleanest timings")
     a = p.parse_args()
@@ -255,6 +290,10 @@ def main():
         print(f"{len(samples)} images, adaptive sweep, {split(a.preprocess)[0]}, psm 3; "
               f"timings on {machine()}, {a.jobs} parallel jobs\n")
         return adaptive_sweep(samples, split(a.preprocess)[0], a.jobs)
+    if a.noise:
+        print(f"{len(samples)} images, noise sweep, {label(variants[0])}; "
+              f"timings on {machine()}, {a.jobs} parallel jobs\n")
+        return noise_sweep(samples, variants[0], a.jobs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
     report(run(samples, variants, a.jobs), default=(app.PREPROCESS, 3, 0, 0, "fast"))

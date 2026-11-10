@@ -11,6 +11,15 @@ TESSDATA_BEST_DIR=~/tessdata_best python -m tests.bench.bench   # include model=
 python -m tests.bench.bench --psm 4 --model fast                # fewer variants
 ```
 
+On the Pi, run it inside the service image (bench dependencies stay out of
+the production `requirements.txt`); the exact commands are in
+[RESULTS.md](RESULTS.md), "Running the bench on the Pi":
+
+```bash
+sudo docker compose run --build --rm -v ./tests:/app/tests -v ./Examples:/app/Examples ocr \
+  sh -c "pip install -q -r tests/bench/requirements.txt && python -m tests.bench.bench Examples --jobs 4 ..."
+```
+
 ## Data: `Examples/` (never committed)
 
 Real medical documents live in `Examples/` at the repository root, which
@@ -45,6 +54,8 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
   `POSTPROCESS=1`.
 - `--adaptive` replaces the variant grid with a sweep of "read with fast,
   rerun with best when mean word confidence is below T".
+- `--noise` replaces it with a sweep of dropping words below a confidence
+  and tiny isolated blocks before output.
 
 - **CER pooled**: all character errors / all characters (long pages weigh
   more). **CER mean / median**: of the per-image CERs; the median shows
