@@ -19,6 +19,7 @@ import multiprocessing
 import os
 import resource
 import sys
+import threading
 import time
 from concurrent.futures import ProcessPoolExecutor
 
@@ -89,13 +90,16 @@ def _read(png):
 
 
 _pool = None
+_pool_lock = threading.Lock()  # the bench calls read() from several threads at once
 
 
 def read(png, jobs):
     """Text of a prepared page, seconds, and the peak RSS of the job's process."""
     global _pool
-    if _pool is None:
-        check_models()
-        # spawn, not fork: the bench's threads are running (fork is Linux's default).
-        _pool = ProcessPoolExecutor(jobs, multiprocessing.get_context("spawn"), initializer=_init)
+    with _pool_lock:
+        if _pool is None:
+            check_models()
+            # spawn, not fork: the bench's threads are running (fork is Linux's default).
+            _pool = ProcessPoolExecutor(jobs, multiprocessing.get_context("spawn"),
+                                        initializer=_init)
     return _pool.submit(_read, png).result()
