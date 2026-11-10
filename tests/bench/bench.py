@@ -117,11 +117,11 @@ def report(results, baseline):
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     ranked = sorted(results, key=lambda v: totals(results[v])[0])
     for v in ranked:
-        mark = " (baseline)" if v == baseline else ""
+        mark = " (service default)" if v == baseline else ""
         cells = " | ".join(f"{x:.1%}" for x in totals(results[v])[:6])
         print(f"| {label(v)}{mark} | {cells} | {totals(results[v])[6]:.1f} |")
 
-    # Per image, the current service settings against the overall winner.
+    # Per image, the service's default settings against the overall winner.
     best = ranked[0]
     cols = [baseline, best] if baseline in results and best != baseline else [best]
     print("\n| Image | " + " | ".join(f"CER {label(v)}" for v in cols) + " |")
@@ -165,7 +165,7 @@ def main():
     samples = load_samples(a.dirs)
     print(f"{len(samples)} images, {len(variants)} variants; "
           f"timings on {machine()}, {a.jobs} parallel jobs\n")
-    report(run(samples, variants, a.jobs), baseline=("baseline", 3, 0, 0, "fast"))
+    report(run(samples, variants, a.jobs), baseline=(app.PREPROCESS, 3, 0, 0, "fast"))
 
 
 if __name__ == "__main__":

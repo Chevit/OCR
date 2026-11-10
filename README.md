@@ -64,10 +64,12 @@ in `app/main.py`.
 - Tesseract turns sideways or upside-down photos upright (from EXIF, or with
   Tesseract's orientation check when EXIF is missing; when that check says
   upside down, the page is read both ways and the surer reading wins), levels
-  text tilted up to 10°, converts to grayscale, raises
-  contrast, and keeps up to 8 MP (about a 300 DPI A4 scan) because it needs
-  detail. Images under 4 MP (for example photos compressed by a messenger) are
-  enlarged up to 2x, which roughly doubles recognition quality for them.
+  text tilted up to 10°, converts to grayscale, evens out shadows and uneven
+  light, raises contrast, and resizes the page so text is about 30 px high
+  (Tesseract reads that size best): small text, for example in photos
+  compressed by a messenger, is enlarged up to 2x, and the result stays within
+  8 MP. When the text size can't be measured, images under 4 MP are enlarged
+  up to 2x instead.
 
 Tesseract settings (environment variables):
 
@@ -78,7 +80,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_MAX_MEGAPIXELS` | `8` | largest image size sent to Tesseract |
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 | `OCR_CONCURRENCY` | `4` | recognitions running at once; extra requests wait their turn. Each Tesseract is limited to 1 CPU thread (`OMP_THREAD_LIMIT=1`) |
-| `PREPROCESS` | `baseline` | image preparation: `baseline`, or `v2`, which also evens out shadows and uneven light and sizes the page so text is about 30 px high (instead of by megapixels) |
+| `PREPROCESS` | `v2` | image preparation: `v2` evens out shadows and uneven light and sizes the page so text is about 30 px high; `baseline` is the previous preparation (sizes by megapixels), kept for comparison |
 | `POSTPROCESS` | `0` | `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); applies to text and word-check output |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 

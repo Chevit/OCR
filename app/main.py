@@ -36,9 +36,10 @@ TESSDATA_BEST_DIR = os.environ.get("TESSDATA_BEST_DIR", "/usr/share/tessdata_bes
 # 6 = one uniform block read row by row (keeps table rows together).
 TESSERACT_PSM = {"text": 3, "table": 6}
 
-# Image preparation: "baseline" sizes pages by megapixels; "v2" also evens
-# out shadows and uneven light and sizes pages by their text height.
-PREPROCESS = os.environ.get("PREPROCESS", "baseline")
+# Image preparation: "v2" evens out shadows and uneven light and sizes pages
+# by their text height; "baseline" (the old way) sizes them by megapixels.
+# ponytail: baseline stays only until the holdout benchmark confirms v2.
+PREPROCESS = os.environ.get("PREPROCESS", "v2")
 if PREPROCESS not in ("baseline", "v2"):
     raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
 # Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
