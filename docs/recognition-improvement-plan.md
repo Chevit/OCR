@@ -78,6 +78,11 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   84.3%; on the Pi 38.3 s/image vs 10.4 for fast (+27.9 s, gate ≤ 5 s)
   and 760 MB per job (gate ≤ 500 MB). **Second engine closed**: no
   Tesseract + PP-OCR merge; RapidOCR stays bench-only.
+- Detector re-check (RESULTS.md (9)), official PaddlePaddle detectors with
+  their own settings, eslav rec: v6 small 84.4% / v6 tiny 83.4% positional
+  critical, ~350 MB per job (gate passes on the Mac), but recognition is
+  ~95% of the time, so the Pi time gate is expected to fail. Pi run
+  pending; the closure stands unless it passes both gates.
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
   remove the baseline path; table TSV (step 5) not started.
 

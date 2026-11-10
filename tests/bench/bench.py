@@ -176,8 +176,9 @@ def label(variant):
     preprocess, psm, dpi, thresholding, model = variant
     if model == "rapidocr":
         return f"{preprocess}, rapidocr (PP-OCRv5 det + eslav rec)"
-    if model == "rapidocr-mobile":
-        return f"{preprocess}, rapidocr-mobile (PP-OCRv5 mobile det + eslav rec)"
+    if model.startswith("rapidocr-"):
+        det = model.removeprefix("rapidocr-").replace("-", " ")
+        return f"{preprocess}, rapidocr (PP-OCR{det} det + eslav rec)"
     return f"{preprocess}, psm {psm}, dpi {dpi or '-'}, thresh {thresholding}, {model}"
 
 

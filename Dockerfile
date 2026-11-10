@@ -45,8 +45,15 @@ ADD --chmod=644 --checksum=sha256:dc6bf0e855247decce214ba6dae5bc135fa0ad725a5918
     ${PADDLEOCR_ONNX}/languages/eslav/rec.onnx /opt/rapidocr/rec.onnx
 ADD --chmod=644 --checksum=sha256:3e95f1581557162870cacdba5af91a4c6be2890710d395b0c3c7578e7ee5e6eb \
     ${PADDLEOCR_ONNX}/languages/eslav/dict.txt /opt/rapidocr/dict.txt
-# RapidOCR's own PP-OCRv5 mobile detector (URL and SHA-256 from rapidocr 3.10.0's default_models.yaml).
-ADD --chmod=644 --checksum=sha256:4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae \
-    https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx \
-    /opt/rapidocr/det_mobile.onnx
+# Official PaddlePaddle ONNX detectors (Hugging Face, pinned commits, SHA-256).
+ARG PADDLE_HF=https://huggingface.co/PaddlePaddle
+ADD --chmod=644 --checksum=sha256:a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d \
+    ${PADDLE_HF}/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx \
+    /opt/rapidocr/det_v5_mobile.onnx
+ADD --chmod=644 --checksum=sha256:193bab7a04fca699a6c82e6abb5b81bdb28177f0abd4062552b04908dafb19f8 \
+    ${PADDLE_HF}/PP-OCRv6_tiny_det_onnx/resolve/2ba1506c0380b8f0b03dd142459aac66d4421f6c/inference.onnx \
+    /opt/rapidocr/det_v6_tiny.onnx
+ADD --chmod=644 --checksum=sha256:d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e \
+    ${PADDLE_HF}/PP-OCRv6_small_det_onnx/resolve/28fe5895c24fd108c19eb3e8479f4ab385fbfc62/inference.onnx \
+    /opt/rapidocr/det_v6_small.onnx
 ENV RAPIDOCR_MODELS_DIR=/opt/rapidocr

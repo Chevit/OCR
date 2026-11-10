@@ -1,5 +1,65 @@
 # Benchmark results
 
+## 2026-11-10 (9) — detector comparison: PP-OCRv5 mobile, PP-OCRv6 tiny, small
+
+Recognizer unchanged (eslav PP-OCRv5 mobile; PP-OCRv6 rec has no
+Cyrillic). Detectors are the official PaddlePaddle ONNX files on Hugging
+Face (`PaddlePaddle/PP-OCRv5_mobile_det_onnx`, `PP-OCRv6_tiny_det_onnx`,
+`PP-OCRv6_small_det_onnx`, `inference.onnx` at pinned commits, SHA-256 in
+the Dockerfile and `rapid.py`), baked into the offline bench image. No
+arena, one thread, one process per job, as before.
+
+Detector settings come from each repo's `inference.yml`; what it leaves
+out comes from PaddleX 3.7.2's text-detection predictor, not RapidOCR's
+defaults:
+
+| | v5 mobile | v6 tiny | v6 small | RapidOCR default (used in (4), (8)) |
+| --- | --- | --- | --- | --- |
+| Resize | longest side 960 (`resize_long`) | longest side ≤ 960 (predictor default) | same | shortest side ≥ 736, page ≤ 2000 |
+| Normalize | ImageNet mean/std | ImageNet | ImageNet | 0.5 / 0.5 |
+| DB thresh / box_thresh / unclip | 0.3 / 0.6 / 1.5 | 0.2 / 0.4 / 1.4 | 0.2 / 0.45 / 1.4 | 0.3 / 0.5 / 1.6 |
+| max_candidates, dilation | 1000, off | 3000, off | 3000, off | 1000, on |
+
+PaddleOCR's general OCR *pipeline* overrides these (shortest side ≥ 64,
+i.e. near full resolution, 0.3 / 0.6 / 1.5); not tested. RapidOCR's page
+limit (≤ 2000 px before detection) is kept for every variant, so the
+recognizer crops lines from the same image.
+
+Selection set, offline bench image, **Docker on an Apple M4 Pro, 4 jobs
+(not a Pi timing)**:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v6 small det + eslav rec | 19.2% | 70.8% | 67.6% | **84.4%** | **85.9%** | 4.5 | 356 MB |
+| v6 tiny det + eslav rec | 19.2% | 71.0% | 67.5% | 83.4% | 84.5% | 4.5 | 353 MB |
+| v5 mobile det (official settings) + eslav rec | 23.8% | 66.7% | 66.2% | 73.4% | 74.6% | 4.2 | 348 MB |
+| v5 mobile det (RapidOCR settings, (8)) | 19.4% | 73.4% | 70.1% | 82.6% | 85.6% | 4.7 | 760 MB |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.8% | 72.2% | 76.6% | 2.9 | 141 MB |
+
+- v6 small reads the most critical tokens (+12.2 points over fast), v6
+  tiny is close; word recall stays 13 points below Tesseract (и/й for і/ї).
+- v5 mobile loses 9 points with its official settings: a whole page at
+  960 px is too small for it. v6 reads well at the same size.
+- **RAM halves** (~350 MB vs 760 MB): detection now runs on a ≤ 960 px
+  image. Under the 500 MB gate on the Mac.
+- **Time is the recognizer's.** Split for the 9 pages, one job (Mac):
+  detection 1.2 s (v5 mobile), 0.9 s (v6 tiny), 2.0 s (v6 small);
+  recognition 24–27 s, ~95% of RapidOCR's time, for 430–455 lines. On
+  the Pi the v5 mobile run took +27.9 s/image over fast ((8)); a faster
+  detector can't take that under +5 s. Expected: RAM passes, time fails.
+
+Pi run (in the `OCR` folder, after `git pull`):
+
+```bash
+sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \
+  --preprocess v2 --psm 3 --dpi 0 --thresh 0 \
+  --model fast,rapidocr-v5-mobile,rapidocr-v6-tiny,rapidocr-v6-small --jobs 4
+```
+
+The build downloads the three detectors once (huggingface.co, checked by
+SHA-256); the run itself is offline. Only one RapidOCR variant's
+processes are alive at a time, so RAM peaks at ~4 × one job.
+
 ## 2026-11-10 (8) — RapidOCR with the PP-OCRv5 mobile detector
 
 Last engine experiment, timing first. `rapidocr-mobile` = RapidOCR's own
