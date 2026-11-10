@@ -55,7 +55,8 @@ The mode selects Tesseract's page segmentation mode (`--psm`): `text` uses 3
 `block` (**Фрагмент** in the UI) is for a cropped part of a page: on crops
 psm 6 reads better than 3 (see `tests/bench/RESULTS.md`), on whole pages
 worse. The UI switches from Текст to Фрагмент when you crop the image and
-back when the crop is removed; you can change it either way. If table
+back when the crop is removed; you can change it either way. Like every
+mode it uses the fast models unless you pick Точні (`model=best`). If table
 rows come out jumbled on your documents, 4 is worth trying in `TESSERACT_PSM`
 in `app/main.py`.
 

@@ -91,8 +91,10 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   Latin ICD-10 codes.
 - Фрагмент mode (`mode=block`, psm 6): the UI picks it after a crop and
   goes back to Текст when the crop is removed. Crops: CER 11.9% → 9.8%,
-  critical 60.2% → 65.9%, same speed on the Pi. fast vs best for
-  fragments is decided on holdout-2.
+  critical 60.2% → 65.9%, same speed on the Pi. Фрагмент uses fast by
+  default (decided without holdout-2: best was +1.5 to +5.6 points of
+  critical tokens for 2.2–2.3x the time on the Pi, RESULTS.md (11), (13));
+  best stays a user choice.
 - Holdout-2 layout ready: `Examples/holdout2/pages`, `Examples/holdout2/crops`
   (crops named after their page, `image-20a`).
 - Next: holdout-2 (new pages from Che) to confirm the scaling fix, then
