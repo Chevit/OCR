@@ -55,11 +55,29 @@ docker compose run --build --rm bench python -m tests.bench.bench Examples/crops
   --preprocess baseline,v2 --psm 3,4,6 --dpi 0 --thresh 0 --model fast,best,rapidocr-v6-small --jobs 4
 ```
 
-Pi (after copying `Examples/crops/` over; `Examples/` is git-ignored):
+**Raspberry Pi 5 Model B Rev 1.1, bench image (offline), 4 jobs**
+(v2, psm 3 and 6):
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **v2, psm 6, fast** | **9.8%** | **84.1%** | **82.0%** | 65.9% | 65.0% | 4.5 | 89 MB |
+| v2, psm 6, best | 10.5% | 83.2% | 81.4% | 71.5% | 69.0% | 9.9 | 95 MB |
+| v2, psm 3, fast (service default) | 11.9% | 81.0% | 79.8% | 60.2% | 58.0% | 4.6 | 89 MB |
+| v2, psm 3, best | 12.5% | 82.3% | 80.9% | 69.1% | 66.0% | 9.5 | 95 MB |
+
+Scores and per-image numbers are identical to the Mac.
+
+- psm 6 costs nothing on the Pi (4.5 vs 4.6 s per crop); best takes
+  ~2.2x fast (9.5–9.9 s), under the 15 s limit on crops.
+- Confirms: for crops, psm 6 fast beats the default on every quality
+  measure at the same speed. A crop mode with psm 6 is the candidate;
+  the full-page default stays psm 3.
+
+Pi command (after copying `Examples/crops/` over; `Examples/` is git-ignored):
 
 ```bash
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
-  --preprocess v2 --psm 3,4,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
+  --preprocess v2 --psm 3,6 --dpi 0 --thresh 0 --model fast,best --jobs 4
 ```
 
 ## 2026-11-10 (10) — cropped text regions (`Examples/crops/`)
