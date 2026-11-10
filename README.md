@@ -85,7 +85,7 @@ Tesseract settings (environment variables):
 | `TESSERACT_TIMEOUT` | `120` | seconds before a run is stopped (504) |
 | `OCR_CONCURRENCY` | `4` | recognitions running at once; extra requests wait their turn. Each Tesseract is limited to 1 CPU thread (`OMP_THREAD_LIMIT=1`) |
 | `PREPROCESS` | `v2` | image preparation: `v2` evens out shadows and uneven light and sizes the page so text is about 30 px high; `baseline` is the previous preparation (sizes by megapixels), kept for comparison |
-| `POSTPROCESS` | `0` | `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); ICD-10 codes get a Latin letter also when glued to other text (`0м(Н90.3)` → `0м(H90.3)`) and lose a space after the dot (`H66. 1` → `H66.1`, plain-text output only); applies to text and word-check output |
+| `POSTPROCESS` | `1` | `0` turns it off. `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); ICD-10 codes get a Latin letter also when glued to other text (`0м(Н90.3)` → `0м(H90.3)`) and lose a space after the dot (`H66. 1` → `H66.1`, plain-text output only); applies to text and word-check output |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
 ## Tests

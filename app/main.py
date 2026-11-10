@@ -45,10 +45,11 @@ if PREPROCESS not in ("baseline", "v2"):
     raise RuntimeError(f"PREPROCESS must be baseline or v2, not {PREPROCESS!r}")
 # Glyph height (px) Tesseract's LSTM models read best; v2 scales to it.
 TEXT_HEIGHT_PX = 30
-# 1 = fix Latin/Cyrillic look-alike letters inside words, letters read
-# instead of digits in numbers, dates and ICD-10 codes, and ICD-10 codes'
-# letter and spacing (fix_icd10).
-POSTPROCESS = os.environ.get("POSTPROCESS", "0") == "1"
+# On by default (0 turns it off): fix Latin/Cyrillic look-alike letters
+# inside words, letters read instead of digits in numbers, dates and ICD-10
+# codes, and ICD-10 codes' letter and spacing (fix_icd10). Never lowered
+# critical tokens on any bench set, CER unchanged (RESULTS.md (12), (13)).
+POSTPROCESS = os.environ.get("POSTPROCESS", "1") == "1"
 
 app = FastAPI(title="OCR service", version="1.0.0")
 

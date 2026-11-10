@@ -80,7 +80,8 @@ sudo docker compose run --build --rm bench python -m tests.bench.bench Examples/
 - **Critical tokens (positional)**: dates, ICD-10 codes, dosages and other
   numbers from the ground truth, share read exactly in their place: output
   words are aligned to ground-truth words, and a token counts only if the
-  words aligned to it contain it. Shown with and without `POSTPROCESS=1`,
+  words aligned to it contain it. Shown with and without `POSTPROCESS=1`
+  (the service's default output is the `POSTPROCESS=1` column),
   and for tokens of 2+ characters only (a lone "1" or "3" is easy to hit
   by chance). The old order-free count is kept as "deprecated" for one
   report (2026-11-10 (7) in RESULTS.md); it rewarded a right number

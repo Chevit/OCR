@@ -40,7 +40,7 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
 - Done: bench harness (CER/WER, word recall/precision/F1, critical tokens;
   `--adaptive`, `--noise` sweeps; Pi run inside the service image);
   `PREPROCESS=v2` as default (baseline path kept); 180° answers checked by
-  reading both ways; `POSTPROCESS=1` (off by default); line-pitch and tilt
+  reading both ways; `POSTPROCESS=1` (on by default since (12)/(13)); line-pitch and tilt
   fixes; dependency bumps; word check always marks numbers, dates, ICD-10
   codes and dosages.
 - Holdout (images 11–19) run once: v2 beats baseline on CER (38.4% → 35.3%
@@ -86,7 +86,9 @@ Results: [tests/bench/RESULTS.md](../tests/bench/RESULTS.md).
   re-reading just uncertain number lines) could reopen it.
 - ICD-10 ground truth is Latin everywhere; POSTPROCESS fixes codes'
   letters also inside words and joins "X00. 1" (RESULTS.md (12)): +3.2
-  points on crops, +0.2 on pages. POSTPROCESS stays off by default.
+  points on crops, +0.2 on pages. POSTPROCESS is now on by default: critical tokens never dropped on any
+  set (+0.2 to +3.2 points), CER unchanged, and the records system needs
+  Latin ICD-10 codes.
 - Фрагмент mode (`mode=block`, psm 6): the UI picks it after a crop and
   goes back to Текст when the crop is removed. Crops: CER 11.9% → 9.8%,
   critical 60.2% → 65.9%, same speed on the Pi. fast vs best for

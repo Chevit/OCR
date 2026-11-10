@@ -83,6 +83,15 @@ class FixWordTests(unittest.TestCase):
 
 
 class PostprocessSwitchTests(unittest.TestCase):
+    def test_on_by_default_and_off_with_0(self):
+        import subprocess, sys
+        env = {k: v for k, v in os.environ.items() if k != "POSTPROCESS"}
+        for value, expected in ((None, "True"), ("0", "False"), ("1", "True")):
+            run_env = env if value is None else {**env, "POSTPROCESS": value}
+            out = subprocess.run([sys.executable, "-c", "import app.main as m; print(m.POSTPROCESS)"],
+                                 env=run_env, capture_output=True, text=True, check=True).stdout.strip()
+            self.assertEqual(out, expected, value)
+
     def test_ocr_applies_postprocess_only_when_enabled(self):
         from fastapi.testclient import TestClient
         from tests.test_tesseract import fake_process, png_bytes
