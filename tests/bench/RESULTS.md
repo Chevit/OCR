@@ -39,7 +39,28 @@ vs 6.1/64/100; image-2 3.7/89/17 vs 7.0/62/67; image-3 15.8/57/50 vs
 - RapidOCR again leads on critical tokens and loses on word recall; the
   Pi time gate closed it ((9)).
 
-Command:
+**Raspberry Pi 5 Model B Rev 1.1, bench image (offline), 4 jobs**
+(v2 only):
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image |
+| --- | --- | --- | --- | --- | --- | --- |
+| v2, psm 6, fast | 8.1% | 78.6% | 77.3% | 59.1% | 68.4% | 4.7 |
+| **v2, psm 3, fast (service default)** | 8.9% | 75.7% | 74.7% | 50.0% | 57.9% | 4.8 |
+| v2, psm 6, best | 10.4% | 75.7% | 75.1% | 77.3% | 78.9% | 8.3 |
+| v2, psm 3, best | 12.0% | 75.7% | 74.7% | 72.7% | 73.7% | 9.0 |
+
+Scores are identical to the Mac. Per image, psm 3 vs psm 6 (fast)
+differ only on image-4 (19.5/50/25 → 16.9/60/75) and image-3 (CER
+15.8% → 15.5%); the psm 6 gain on crops is one strip.
+
+- Every variant is well under the 15 s limit on a crop (fast 4.7–4.8 s,
+  best 8.3–9.0 s; s/image includes preparation and the orientation check).
+- best costs ~1.8x fast for +18 to +23 points of critical tokens (4–5
+  tokens) and higher CER. With 5 crops this isn't enough to pick a
+  crop-mode default; more crops would be needed.
+
+Command (Mac; on the Pi with `sudo` and `--preprocess v2 --psm 3,6
+--model fast,best`):
 
 ```bash
 docker compose run --build --rm bench python -m tests.bench.bench Examples/crops \
