@@ -49,9 +49,14 @@ python -m tests.bench.bench Examples/holdout --preprocess v2 --psm 4 --dpi 300 -
 
 - **Word recall / precision / F1**: words of the ground truth found in the
   output, and output words that are in the ground truth, in any order.
-- **Critical tokens**: dates, ICD-10 codes, dosages and other numbers from
-  the ground truth, share read exactly; shown with and without
-  `POSTPROCESS=1`.
+- **Critical tokens (positional)**: dates, ICD-10 codes, dosages and other
+  numbers from the ground truth, share read exactly in their place: output
+  words are aligned to ground-truth words, and a token counts only if the
+  words aligned to it contain it. Shown with and without `POSTPROCESS=1`,
+  and for tokens of 2+ characters only (a lone "1" or "3" is easy to hit
+  by chance). The old order-free count is kept as "deprecated" for one
+  report (2026-11-10 (7) in RESULTS.md); it rewarded a right number
+  anywhere on the page.
 - `--adaptive` replaces the variant grid with a sweep of "read with fast,
   rerun with best when mean word confidence is below T".
 - `--noise` replaces it with a sweep of dropping words below a confidence

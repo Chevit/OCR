@@ -13,6 +13,7 @@ scored, only the characters and words.
 """
 import argparse
 import asyncio
+import bisect
 import collections
 import itertools
 import os
@@ -101,20 +102,58 @@ def bag(pattern, text, normalize=str.lower):
     return collections.Counter(normalize(m) for m in re.findall(pattern, text))
 
 
+def no_space(m):
+    return "".join(m.split())
+
+
+def critical_read(t, h):
+    """Positional critical tokens: (found, truth, found 2+ chars, truth 2+ chars).
+    Output words are aligned to ground-truth words (Levenshtein on word
+    sequences); a ground-truth token counts as read only if the output words
+    aligned to it contain exactly that token. A correct date elsewhere on the
+    page doesn't count, unlike the old order-free count."""
+    tw, hw = t.split(), h.split()
+    aligned = {}  # truth word index -> output word indices
+    for tag, i1, i2, j1, j2 in Levenshtein.opcodes(tw, hw):
+        if tag in ("equal", "replace"):
+            m, n = i2 - i1, j2 - j1
+            for i in range(i1, i2):  # spread a block proportionally (3 words read as 1, ...)
+                lo = j1 + (i - i1) * n // m
+                aligned[i] = range(lo, max(lo + 1, j1 + (i - i1 + 1) * n // m))
+    starts = list(itertools.accumulate((len(w) + 1 for w in tw[:-1]), initial=0))
+    counts = [0, 0, 0, 0]
+    for match in re.finditer(CRITICAL, t):
+        token = no_space(match.group())
+        first = bisect.bisect_right(starts, match.start()) - 1
+        last = bisect.bisect_right(starts, match.end() - 1) - 1
+        js = sorted({j for i in range(first, last + 1) for j in aligned.get(i, ())})
+        read = bool(js) and js == list(range(js[0], js[-1] + 1)) and token in {
+            no_space(x) for x in re.findall(CRITICAL, " ".join(hw[js[0]:js[-1] + 1]))}
+        counts[0] += read
+        counts[1] += 1
+        if len(token) >= 2:
+            counts[2] += read
+            counts[3] += 1
+    return counts
+
+
 def score(truth, text):
     """Counts for one page, summed over pages for pooled rates. Whitespace is
     collapsed first. Word recall/precision ignore order: a page read in
     another block order (stamp before header) has bad CER yet every word."""
     t, h = " ".join(truth.split()), " ".join(text.split())
     words_t, words_h = bag(r"\w+", t), bag(r"\w+", h)
-    no_space = lambda m: "".join(m.split())
     crit_t, crit_h = bag(CRITICAL, t, no_space), bag(CRITICAL, h, no_space)
+    found, truth_n, found2, truth2 = critical_read(t, h)
     return collections.Counter(
         char_errors=Levenshtein.distance(t, h), chars=len(t),
         word_errors=Levenshtein.distance(t.split(), h.split()), words=len(t.split()),
         words_found=sum((words_t & words_h).values()),
         words_truth=sum(words_t.values()), words_output=sum(words_h.values()),
-        critical_found=sum((crit_t & crit_h).values()), critical_truth=sum(crit_t.values()),
+        critical_found=found, critical_truth=truth_n,
+        critical2_found=found2, critical2_truth=truth2,
+        # Deprecated order-free count, kept for one report for continuity.
+        critical_bag_found=sum((crit_t & crit_h).values()), critical_bag_truth=sum(crit_t.values()),
     )
 
 
@@ -149,12 +188,17 @@ def rates(s):
     recall = s["words_found"] / s["words_truth"]
     precision = s["words_found"] / s["words_output"] if s["words_output"] else 0.0
     f1 = 2 * recall * precision / (recall + precision) if recall + precision else 0.0
-    critical = s["critical_found"] / s["critical_truth"] if s["critical_truth"] else 1.0
+    critical = share(s, "critical")
     return cer(s), s["word_errors"] / s["words"], recall, precision, f1, critical
 
 
+def share(s, name):
+    return s[f"{name}_found"] / s[f"{name}_truth"] if s[f"{name}_truth"] else 1.0
+
+
 COLUMNS = ("CER pooled", "CER mean", "CER median", "WER", "Word recall", "Word precision",
-           "Word F1", "Critical tokens", "Critical, POSTPROCESS=1", "CER, POSTPROCESS=1")
+           "Word F1", "Critical (positional)", "Critical, 2+ chars", "Critical (order-free, deprecated)",
+           "Critical, POSTPROCESS=1", "CER, POSTPROCESS=1")
 
 
 def summary(rows):
@@ -165,7 +209,8 @@ def summary(rows):
     pooled_cer, wer, recall, precision, f1, critical = rates(total)
     per_image = [cer(r[1]) for r in rows]
     return (pooled_cer, statistics.mean(per_image), statistics.median(per_image), wer,
-            recall, precision, f1, critical, rates(post)[5], cer(post),
+            recall, precision, f1, critical, share(total, "critical2"),
+            share(total, "critical_bag"), rates(post)[5], cer(post),
             sum(r[2] for r in rows) / len(rows))
 
 

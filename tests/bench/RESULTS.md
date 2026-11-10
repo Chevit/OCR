@@ -1,5 +1,39 @@
 # Benchmark results
 
+## 2026-11-10 (7) — positional critical tokens, all variants re-scored
+
+The critical-token count was order-free: a page counted a date as read if
+it appeared anywhere, so a right number in the wrong place, or table
+borders read as "1", scored (found with the hybrid experiment, section (6)
+on branch `experiment/hybrid-reread`). Now output words are aligned to
+ground-truth words (rapidfuzz Levenshtein opcodes on word sequences) and a
+token counts only if the words aligned to it contain exactly that token.
+"2+ chars" is the same positional count for tokens of two or more
+characters. The old column is kept once as "order-free, deprecated".
+
+Images 1–10 (9 with ground truth), offline bench image (Docker on an
+Apple M4 Pro, 4 jobs; s/image is not a Pi timing), ranked by pooled CER:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | Critical (order-free, deprecated) | s/image |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| v2, rapidocr (PP-OCRv5 det + eslav rec) | 20.6% | 73.0% | 69.4% | **81.4%** | **82.1%** | 90.6% | 20.4 |
+| v2, psm 3, best | 21.4% | 84.9% | 79.2% | 73.4% | 75.3% | 81.4% | 5.5 |
+| v2, psm 3, fast + hybrid rule C | 21.5% | 84.6% | 79.0% | 72.5% | 77.3% | 78.9% | 3.6 |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.8% | 72.2% | 76.6% | 78.4% | 2.8 |
+| v2, psm 4, best | 21.6% | 84.9% | 79.6% | 76.7% | 77.0% | 83.4% | 5.3 |
+| v2, psm 4, fast | 22.2% | 83.9% | 78.9% | 73.4% | 76.3% | 77.2% | 2.7 |
+| baseline, psm 3, fast | 34.0% | 70.2% | 71.4% | 62.0% | 67.7% | 70.2% | 2.6 |
+
+Hybrid rule C reads Tesseract's TSV; plain fast text from the TSV scores
+the same as the default row, so its +0.3 (+0.7 on 2+ chars) is the re-read.
+
+- Every variant loses 4–9 points; the ranking of the main choices holds,
+  except psm 4 now beats psm 3 on critical tokens (fast 73.4% vs 72.2%,
+  best 76.7% vs 73.4%), where the order-free count had psm 3 ahead.
+- RapidOCR's lead over the default shrinks from 12.2 to 9.2 points
+  (5.5 on 2+ chars); still not adoptable on the Pi (116.5 s/image, 1.9 GB).
+- Hybrid rule C: +0.3 points, confirming "not adopted".
+
 ## 2026-11-10 (5) — straightening fills corners with paper gray (image-17 fixed)
 
 `straighten()` (used by both paths and by `turn_upright`) now fills the
