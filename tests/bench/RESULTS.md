@@ -46,19 +46,36 @@ Selection set, offline bench image, **Docker on an Apple M4 Pro, 4 jobs
   detection 1.2 s (v5 mobile), 0.9 s (v6 tiny), 2.0 s (v6 small);
   recognition 24–27 s, ~95% of RapidOCR's time, for 430–455 lines. On
   the Pi the v5 mobile run took +27.9 s/image over fast ((8)); a faster
-  detector can't take that under +5 s. Expected: RAM passes, time fails.
+  detector can't take that under +5 s. Confirmed on the Pi below.
 
-Pi run (in the `OCR` folder, after `git pull`):
+**Raspberry Pi 5 Model B Rev 1.1, bench image (offline), 4 jobs**:
+
+| Variant | CER pooled | Word recall | Word F1 | Critical (positional) | Critical, 2+ chars | s/image | Over fast | RAM peak per job |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| v6 small det + eslav rec | 19.2% | 70.8% | 67.6% | **84.4%** | **85.9%** | 36.3 | **+25.6** | 360 MB |
+| v6 tiny det + eslav rec | 19.2% | 71.0% | 67.5% | 83.4% | 84.5% | 38.0 | **+27.3** | 356 MB |
+| v5 mobile det (official settings) + eslav rec | 23.8% | 66.7% | 66.2% | 73.4% | 74.6% | 34.1 | **+23.4** | 349 MB |
+| v2, psm 3, fast (service default) | 21.6% | 84.3% | 78.8% | 72.2% | 76.6% | 10.7 | — | 143 MB |
+
+Scores are identical to the Mac run; only time and RAM differ.
+
+- **RAM gate passes** (349–360 MB ≤ 500 MB). **Time gate fails** for
+  every detector: +23.4 to +27.3 s/image over fast (limit 5 s), 3.2–3.6x
+  fast. Detector size barely matters (v5 mobile with official settings
+  is the fastest and reads worst); the eslav recognizer is the cost, as
+  the Mac split showed.
+- **Decision: second engine stays closed.** No Tesseract + PP-OCR merge.
+  Reopening would need a recognizer several times faster on the Pi (e.g.
+  re-reading only the number/date lines Tesseract is unsure of), not a
+  different detector.
+
+Command used (in the `OCR` folder, after `git pull`):
 
 ```bash
 sudo docker compose run --build --rm bench python -m tests.bench.bench Examples \
   --preprocess v2 --psm 3 --dpi 0 --thresh 0 \
   --model fast,rapidocr-v5-mobile,rapidocr-v6-tiny,rapidocr-v6-small --jobs 4
 ```
-
-The build downloads the three detectors once (huggingface.co, checked by
-SHA-256); the run itself is offline. Only one RapidOCR variant's
-processes are alive at a time, so RAM peaks at ~4 × one job.
 
 ## 2026-11-10 (8) — RapidOCR with the PP-OCRv5 mobile detector
 
