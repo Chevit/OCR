@@ -124,6 +124,7 @@ Run these in the `OCR` folder. On the Pi, put `sudo` in front of `docker`.
 | --- | --- |
 | Update to the latest code | `git pull`, then `docker compose up -d --build` |
 | Watch logs | `docker compose logs -f` |
+| Usage and statistics logs | `tail logs/usage.log logs/stats.jsonl` (see README, Logs) |
 | Stop | `docker compose down` |
 | Start again | `docker compose up -d` |
 
@@ -137,7 +138,8 @@ shows a field for the token, and API requests need the header
 
 ## Remove and clean up
 
-The service keeps no data: there are no volumes, and results are not stored.
+The service stores no documents or results. Its only data is the usage and
+statistics logs in the `logs` folder inside `OCR` (no text or file names).
 Removing the container, the image and the folder removes everything.
 
 ### Remove the service

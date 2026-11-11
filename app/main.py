@@ -85,7 +85,7 @@ def note(**values) -> None:
 
 
 def now() -> str:
-    return datetime.now().isoformat(timespec="seconds")
+    return datetime.now().astimezone().isoformat(timespec="seconds")  # with UTC offset: the container runs on UTC
 
 
 def log_usage(request: Request, what: str, status: int) -> None:

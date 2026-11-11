@@ -95,7 +95,8 @@ Compose mounts it at `./logs` next to `docker-compose.yml`; an empty value
 turns logging off). Each file rotates at 5 MB, keeping 3 old copies. Neither
 ever holds recognized text or file names.
 
-- `usage.log`: one tab-separated line per page open or OCR request: time,
+- `usage.log`: one tab-separated line per page open or OCR request: time
+  (with UTC offset; the container runs on UTC),
   `page` or `ocr`, HTTP status (499 = stopped by the user), client IP.
 - `stats.jsonl`: one JSON line per recognition: `time`, `mode`, `model`,
   `output`, `bytes`, `content_type`, `max_megapixels`, `postprocess`, `status`,
