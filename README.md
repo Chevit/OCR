@@ -88,6 +88,29 @@ Tesseract settings (environment variables):
 | `POSTPROCESS` | `1` | `0` turns it off. `1` fixes Latin/Cyrillic look-alike letters inside words (`Пaцієнт` → `Пацієнт`, `СO2` → `CO2`) and letters read instead of digits in numbers, dates and ICD-10 codes (`К29.7` → `K29.7`, `12.О5.2024` → `12.05.2024`); ICD-10 codes get a Latin letter also when glued to other text (`0м(Н90.3)` → `0м(H90.3)`) and lose a space after the dot (`H66. 1` → `H66.1`, plain-text output only); applies to text and word-check output |
 | `TESSDATA_BEST_DIR` | `/usr/share/tessdata_best` | tessdata_best models for `model=best` (the Docker image downloads them) |
 
+## Logs
+
+The service appends to two files in `LOG_DIR` (default `logs/`; Docker
+Compose mounts it at `./logs` next to `docker-compose.yml`; an empty value
+turns logging off). Each file rotates at 5 MB, keeping 3 old copies. Neither
+ever holds recognized text or file names.
+
+- `usage.log`: one tab-separated line per page open or OCR request: time,
+  `page` or `ocr`, HTTP status (499 = stopped by the user), client IP.
+- `stats.jsonl`: one JSON line per recognition: `time`, `mode`, `model`,
+  `output`, `bytes`, `content_type`, `max_megapixels`, `postprocess`, `status`,
+  `seconds` (total) and `queue_seconds` (waiting for a free slot), and what the
+  preparation decided: `source_format`, `source_size` ([width, height]),
+  `inverted` (light text on dark), `skew` (degrees), `line_pitch` (px),
+  `scale`, `osd_rotation` (the orientation check's answer) and `rotated` (what
+  was applied). Text output adds `chars` and `lines`; `tsv`/`words` output
+  adds `words`, `mean_confidence` and `low_confidence_words` (under 60).
+  A request that failed partway has only the fields it got to.
+
+```bash
+jq -s 'group_by(.mode) | map({mode: .[0].mode, n: length, avg_s: (map(.seconds) | add / length)})' logs/stats.jsonl
+```
+
 ## Tests
 
 ```bash

@@ -1,9 +1,14 @@
 import asyncio
 import base64
+import contextvars
 import io
+import json
+import logging
 import os
 import re
 import time
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Header, Request, UploadFile
@@ -44,6 +49,49 @@ TEXT_HEIGHT_PX = 30
 # codes, and ICD-10 codes' letter and spacing (fix_icd10). Never lowered
 # critical tokens on any bench set, CER unchanged (RESULTS.md (12), (13)).
 POSTPROCESS = os.environ.get("POSTPROCESS", "1") == "1"
+
+# Local log files: usage.log (one line per page open or OCR request) and
+# stats.jsonl (one JSON line per recognition, see note()). Never the
+# recognized text or file names: the documents are medical. Empty = off.
+LOG_DIR = os.environ.get("LOG_DIR", "logs")
+
+
+def file_logger(name: str) -> logging.Logger:
+    """A logger appending to LOG_DIR/name, rotated at 5 MB (3 old files kept)
+    so the Pi's SD card can't fill up; does nothing when LOG_DIR is empty."""
+    log = logging.getLogger(f"ocr.{name}")
+    log.propagate = False
+    if LOG_DIR and not log.handlers:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        handler = RotatingFileHandler(
+            os.path.join(LOG_DIR, name), maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(handler)
+        log.setLevel(logging.INFO)
+    return log
+
+
+USAGE_LOG = file_logger("usage.log")
+STATS_LOG = file_logger("stats.jsonl")
+# The current request's stats; pipeline steps add what they decided.
+STATS: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("stats", default=None)
+
+
+def note(**values) -> None:
+    """Record values in the current request's stats line, if there is one."""
+    stats = STATS.get()
+    if stats is not None:
+        stats.update(values)
+
+
+def now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def log_usage(request: Request, what: str, status: int) -> None:
+    client = request.client.host if request.client else "-"
+    USAGE_LOG.info("%s\t%s\t%s\t%s", now(), what, status, client)
+
 
 app = FastAPI(title="OCR service", version="1.0.0")
 
@@ -204,7 +252,9 @@ def line_pitch(img: Image.Image, angle: float) -> Optional[float]:
 def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
     """Clean up an image for Tesseract: upright, grayscale, even lighting,
     high contrast, levelled, and scaled so text is about 30 px high."""
-    img = ImageOps.exif_transpose(open_image(raw))  # phone photos are often rotated
+    img = open_image(raw)
+    note(source_format=img.format, source_size=list(img.size))
+    img = ImageOps.exif_transpose(img)  # phone photos are often rotated
 
     # Converting straight to grayscale turns transparent pixels black, which
     # hides black text, so flatten transparency onto white first.
@@ -215,7 +265,8 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
     img = ImageOps.autocontrast(img.convert("L"))
     # Light text on a dark background (dark-theme screenshots): Tesseract and
     # the tilt check both expect dark text on light, so flip mostly-dark images.
-    if ImageStat.Stat(img).mean[0] < 128:
+    inverted = ImageStat.Stat(img).mean[0] < 128
+    if inverted:
         img = ImageOps.invert(img)
 
     img = ImageOps.autocontrast(flatten_background(img))
@@ -242,6 +293,8 @@ def prepare_for_tesseract(raw: bytes, max_megapixels: float) -> bytes:
         floor = 0.5 if megapixels > max_megapixels else scale
         scale = min(2.0, (max_megapixels / megapixels) ** 0.5,
                     max(floor, TEXT_HEIGHT_PX / (pitch / 1.75)))
+    note(inverted=inverted, skew=round(angle, 2),
+         line_pitch=round(pitch, 1) if pitch else None, scale=round(scale, 3))
     if scale != 1.0:
         new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
         img = img.resize(new_size, Image.LANCZOS)
@@ -288,19 +341,26 @@ async def tesseract_ocr(
     the given renderer: "tsv" = words with confidence and position) and the
     prepared PNG it read, which word positions refer to."""
     # The whole job holds a slot, so CPU and RAM stay bounded; extra requests wait.
+    queued = time.time()
     async with OCR_SLOTS:
+        note(queue_seconds=round(time.time() - queued, 2))
         # Image work runs in a thread so a big photo doesn't stall other requests.
         image_png = await asyncio.to_thread(prepare_for_tesseract, raw, max_megapixels)
         image_png = await make_upright(image_png)
         return await run_tesseract(image_png, mode, renderer, model), image_png
 
 
-def mean_word_confidence(tsv: str) -> float:
-    """Mean Tesseract confidence of the recognized words in a TSV; 0 if none."""
-    confs = [
+def word_confidences(tsv: str) -> list[float]:
+    """Tesseract's confidence (0-100) of each recognized word in a TSV."""
+    return [
         float(c[10]) for c in (row.split("\t") for row in tsv.splitlines())
         if len(c) == 12 and c[0] == "5" and c[11].strip() and float(c[10]) >= 0
     ]
+
+
+def mean_word_confidence(tsv: str) -> float:
+    """Mean Tesseract confidence of the recognized words in a TSV; 0 if none."""
+    confs = word_confidences(tsv)
     return sum(confs) / len(confs) if confs else 0.0
 
 
@@ -310,6 +370,7 @@ async def make_upright(image_png: bytes) -> bytes:
     dark areas around them, and a flipped page loses all its text. So read
     the page both ways (fast models) and keep the way Tesseract is surer of."""
     rotation = await detect_rotation(image_png)
+    note(osd_rotation=rotation, rotated=rotation)
     if not rotation:
         return image_png
     turned = await asyncio.to_thread(turn_upright, image_png, rotation)
@@ -321,6 +382,7 @@ async def make_upright(image_png: bytes) -> bytes:
         flipped = mean_word_confidence(
             (await run_tesseract(turned, "text", "tsv")).decode("utf-8", "replace"))
         if flipped <= as_is:
+            note(rotated=0)
             return image_png
     return turned
 
@@ -545,59 +607,81 @@ async def ocr(
     model: Literal["fast", "best"] = Form("fast"),
     authorization: Optional[str] = Header(None),
 ):
-    check_auth(authorization)
+    status, stats = 500, None
+    try:
+        check_auth(authorization)
 
-    raw = await file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="Порожній файл")
-    if len(raw) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"Файл має бути не більше {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="Порожній файл")
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Файл має бути не більше {MAX_UPLOAD_BYTES // (1024 * 1024)} МБ",
+            )
+
+        if max_megapixels is not None and max_megapixels <= 0:
+            raise HTTPException(status_code=400, detail="max_megapixels має бути більше 0")
+
+        if model == "best" and not os.path.isdir(TESSDATA_BEST_DIR):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Точні моделі не встановлено на сервері. Деталі: немає {TESSDATA_BEST_DIR}",
+            )
+
+        renderer = "tsv" if output in ("tsv", "words") else None
+        started = time.time()
+        stats = {"time": now(), "mode": mode, "model": model, "output": output,
+                 "bytes": len(raw), "content_type": file.content_type,
+                 "max_megapixels": max_megapixels, "postprocess": POSTPROCESS}
+        STATS.set(stats)  # before the OCR task starts, so it sees the same dict
+        out, page_png = await cancel_on_disconnect(
+            request,
+            tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer, model),
         )
+        result = out.decode("utf-8", errors="replace")
+        if POSTPROCESS:
+            result = postprocess_tsv(result) if renderer else postprocess_text(result)
+        status = 200
+        if renderer:
+            confs = word_confidences(result)
+            stats.update(words=len(confs),
+                         mean_confidence=round(sum(confs) / len(confs), 1) if confs else None,
+                         low_confidence_words=sum(c < 60 for c in confs))
+        if output == "words":
+            # TSV word boxes are in the prepared page's pixels, so the page
+            # comes along: the UI shows it and draws boxes on it as-is.
+            return JSONResponse({
+                "tsv": result,
+                "image": await asyncio.to_thread(to_jpeg_data_url, page_png),
+                "seconds": round(time.time() - started, 2),
+            })
+        if output == "tsv":
+            return PlainTextResponse(
+                result,
+                media_type="text/tab-separated-values",
+            )
 
-    if max_megapixels is not None and max_megapixels <= 0:
-        raise HTTPException(status_code=400, detail="max_megapixels має бути більше 0")
-
-    if model == "best" and not os.path.isdir(TESSDATA_BEST_DIR):
-        raise HTTPException(
-            status_code=503,
-            detail=f"Точні моделі не встановлено на сервері. Деталі: немає {TESSDATA_BEST_DIR}",
-        )
-
-    renderer = "tsv" if output in ("tsv", "words") else None
-    started = time.time()
-    out, page_png = await cancel_on_disconnect(
-        request,
-        tesseract_ocr(raw, mode, max_megapixels or TESSERACT_MAX_MEGAPIXELS, renderer, model),
-    )
-    result = out.decode("utf-8", errors="replace")
-    if POSTPROCESS:
-        result = postprocess_tsv(result) if renderer else postprocess_text(result)
-    if output == "words":
-        # TSV word boxes are in the prepared page's pixels, so the page
-        # comes along: the UI shows it and draws boxes on it as-is.
-        return JSONResponse({
-            "tsv": result,
-            "image": await asyncio.to_thread(to_jpeg_data_url, page_png),
+        text = clean_tesseract_text(result)
+        note(chars=len(text), lines=text.count("\n") + 1 if text else 0)
+        if output == "text":
+            return PlainTextResponse(text)
+        return {
+            "text": text,
+            "mode": mode,
+            "model": f"tesseract {model} ({TESSERACT_LANGS})",
             "seconds": round(time.time() - started, 2),
-        })
-    if output == "tsv":
-        return PlainTextResponse(
-            result,
-            media_type="text/tab-separated-values",
-        )
-
-    text = clean_tesseract_text(result)
-    if output == "text":
-        return PlainTextResponse(text)
-    return {
-        "text": text,
-        "mode": mode,
-        "model": f"tesseract {model} ({TESSERACT_LANGS})",
-        "seconds": round(time.time() - started, 2),
-        "filename": file.filename,
-    }
+            "filename": file.filename,
+        }
+    except HTTPException as e:
+        status = e.status_code
+        raise
+    finally:
+        log_usage(request, "ocr", status)
+        if stats is not None:
+            stats["status"] = status
+            stats["seconds"] = round(time.time() - started, 2)
+            STATS_LOG.info(json.dumps(stats, ensure_ascii=False))
 
 
 @app.get("/api")
@@ -613,7 +697,8 @@ async def api_info():
 
 
 @app.get("/")
-async def root():
+async def root(request: Request):
+    log_usage(request, "page", 200)
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 

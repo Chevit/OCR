@@ -120,3 +120,32 @@ class ConcurrencyTests(unittest.TestCase):
         results = asyncio.run(go())
         self.assertEqual(len(results), 6)
         self.assertEqual(peak, 2)
+
+
+class LogTests(unittest.TestCase):
+    def test_recognition_writes_usage_and_stats_without_text(self):
+        import io
+        import json
+        from unittest.mock import AsyncMock
+
+        from PIL import Image
+
+        png = io.BytesIO()
+        Image.new("L", (200, 100), 255).save(png, format="PNG")
+        with patch("app.main.run_tesseract", AsyncMock(return_value="Пацієнт Іванов\n".encode())), \
+             patch("app.main.detect_rotation", AsyncMock(return_value=0)), \
+             patch("app.main.USAGE_LOG") as usage, patch("app.main.STATS_LOG") as stats:
+            response = TestClient(app).post(
+                "/ocr", files={"file": ("secret-name.png", png.getvalue(), "image/png")})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(usage.info.call_args.args[2:4], ("ocr", 200))
+        line = stats.info.call_args.args[0]
+        self.assertNotIn("Іванов", line)
+        self.assertNotIn("secret-name", line)
+        record = json.loads(line)
+        self.assertEqual(record["status"], 200)
+        self.assertEqual(record["source_size"], [200, 100])
+        self.assertEqual(record["rotated"], 0)
+        self.assertEqual(record["chars"], len("Пацієнт Іванов"))
+        self.assertIn("queue_seconds", record)

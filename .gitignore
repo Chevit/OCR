@@ -230,5 +230,7 @@ tests/bench/images/
 tests/bench/synthetic/
 
 .DS_Store
+# Local usage and statistics logs (LOG_DIR)
+logs/
 # RapidOCR model files of the removed experiment (tag bench-paddleocr-experiment)
 tests/bench/models/
